@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Welcome | WellHabit{% endblock %}
+{% block content %}
+<section class="hero card">
+    <div>
+        <span class="badge">Flask Full Stack</span>
+        <h1>Track water, sleep, exercise, focus time, and daily tasks in one place.</h1>
+        <p>A simple personal dashboard with account system, SQLite database, Pomodoro timer, monthly calendar, and today's todo list beside the timer.</p>
+        <div class="hero-actions">
+            <a class="btn primary" href="{{ url_for('register') }}">Create Account</a>
+            <a class="btn secondary" href="{{ url_for('login') }}">Log In</a>
+        </div>
+    </div>
+</section>
+{% endblock %}

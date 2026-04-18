@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Login | WellHabit{% endblock %}
+{% block content %}
+<section class="auth-card card narrow">
+    <h2>Log In</h2>
+    <form method="post" class="form-grid">
+        <label>Email
+            <input type="email" name="email" required>
+        </label>
+        <label>Password
+            <input type="password" name="password" required>
+        </label>
+        <button class="btn primary" type="submit">Log In</button>
+    </form>
+    <p class="muted">No account yet? <a href="{{ url_for('register') }}">Register here</a>.</p>
+</section>
+{% endblock %}

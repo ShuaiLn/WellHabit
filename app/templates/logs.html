@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Daily Log | WellHabit{% endblock %}
+{% block content %}
+<section class="split-grid">
+    <article class="card">
+        <div class="section-title-row">
+            <h1>Daily Health Record</h1>
+            <span class="muted">Save one record per day</span>
+        </div>
+        <form method="post" class="form-grid two-columns">
+            <label>Date
+                <input type="date" name="log_date" value="{{ selected_date.isoformat() }}" required>
+            </label>
+            <label>Water (ml)
+                <input type="number" name="water_ml" min="0" value="{{ current_log.water_ml if current_log else 0 }}" required>
+            </label>
+            <label>Sleep Hours
+                <input type="number" name="sleep_hours" min="0" step="0.5" value="{{ current_log.sleep_hours if current_log else 0 }}" required>
+            </label>
+            <label>Sleep Quality
+                <select name="sleep_quality">
+                    {% set quality = current_log.sleep_quality if current_log else 'Average' %}
+                    {% for option in ['Poor', 'Average', 'Good', 'Excellent'] %}
+                        <option value="{{ option }}" {% if option == quality %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Steps
+                <input type="number" name="steps" min="0" value="{{ current_log.steps if current_log else 0 }}" required>
+            </label>
+            <label>Exercise (minutes)
+                <input type="number" name="exercise_minutes" min="0" value="{{ current_log.exercise_minutes if current_log else 0 }}" required>
+            </label>
+            <label class="full-width">Notes
+                <textarea name="notes" rows="4" placeholder="Optional notes">{{ current_log.notes if current_log else '' }}</textarea>
+            </label>
+            <button class="btn primary full-width" type="submit">Save Daily Record</button>
+        </form>
+    </article>
+
+    <article class="card">
+        <div class="section-title-row">
+            <h2>History</h2>
+            <span class="muted">Latest first</span>
+        </div>
+        <div class="history-list">
+            {% for log in all_logs %}
+                <a class="history-item" href="{{ url_for('logs', date=log.log_date.isoformat()) }}">
+                    <strong>{{ log.log_date }}</strong>
+                    <span>{{ log.water_ml }} ml · {{ log.sleep_hours }} h · {{ log.steps }} steps</span>
+                </a>
+            {% else %}
+                <p class="muted">No records yet.</p>
+            {% endfor %}
+        </div>
+    </article>
+</section>
+{% endblock %}

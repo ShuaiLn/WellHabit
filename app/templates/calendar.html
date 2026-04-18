@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% block title %}Calendar | WellHabit{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ display_date.strftime('%B %Y') }} Todo Calendar</h1>
+        <p class="muted">Monthly view of your schedule and tasks</p>
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{{ url_for('calendar_view', year=prev_year, month=prev_month) }}">Previous</a>
+        <a class="btn secondary" href="{{ url_for('calendar_view') }}">This Month</a>
+        <a class="btn secondary" href="{{ url_for('calendar_view', year=next_year, month=next_month) }}">Next</a>
+    </div>
+</section>
+
+<section class="split-grid calendar-layout">
+    <article class="card">
+        <div class="calendar-grid">
+            <div class="calendar-weekday">Mon</div>
+            <div class="calendar-weekday">Tue</div>
+            <div class="calendar-weekday">Wed</div>
+            <div class="calendar-weekday">Thu</div>
+            <div class="calendar-weekday">Fri</div>
+            <div class="calendar-weekday">Sat</div>
+            <div class="calendar-weekday">Sun</div>
+
+            {% for week in weeks %}
+                {% for day in week %}
+                    <div class="calendar-cell {% if not day.in_month %}muted-cell{% endif %} {% if day.is_today %}today-cell{% endif %}">
+                        <div class="cell-date">{{ day.date.day }}</div>
+                        <div class="cell-tasks">
+                            {% for task in day.tasks[:3] %}
+                                <div class="mini-task {% if task.completed %}done{% endif %}">{{ task.title }}</div>
+                            {% endfor %}
+                            {% if day.tasks|length > 3 %}
+                                <div class="mini-task more">+{{ day.tasks|length - 3 }} more</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+    </article>
+
+    <aside class="card">
+        <h2>Add New Task</h2>
+        <form method="post" action="{{ url_for('add_task') }}" class="form-grid">
+            <label>Task Title
+                <input type="text" name="title" required>
+            </label>
+            <label>Date
+                <input type="date" name="task_date" required>
+            </label>
+            <label>Description
+                <textarea name="description" rows="4" placeholder="Optional details"></textarea>
+            </label>
+            <button class="btn primary" type="submit">Add Task</button>
+        </form>
+    </aside>
+</section>
+
+<section class="card">
+    <div class="section-title-row">
+        <h2>Tasks This Month</h2>
+        <span class="muted">Manage all tasks below</span>
+    </div>
+    <div class="todo-list">
+        {% for week in weeks %}
+            {% for day in week %}
+                {% for task in day.tasks %}
+                    <div class="todo-item {% if task.completed %}done{% endif %}">
+                        <div>
+                            <strong>{{ task.task_date }} · {{ task.title }}</strong>
+                            {% if task.description %}<p>{{ task.description }}</p>{% endif %}
+                        </div>
+                        <div class="todo-actions">
+                            <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}">
+                                <button class="btn small-btn secondary" type="submit">{% if task.completed %}Undo{% else %}Done{% endif %}</button>
+                            </form>
+                            <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}">
+                                <button class="btn small-btn danger" type="submit">Delete</button>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% endfor %}
+        {% else %}
+            <p class="muted">No tasks this month.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

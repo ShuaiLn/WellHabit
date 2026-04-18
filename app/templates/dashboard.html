@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+{% block title %}Home | WellHabit{% endblock %}
+{% block content %}
+<section class="dashboard-topbar">
+    <div>
+        <p class="eyebrow">WellHabit Dashboard</p>
+        <h1>Welcome back, {{ current_user.username }}</h1>
+        <p class="muted">Today is {{ today.strftime('%B %d, %Y') }}</p>
+    </div>
+    <div class="header-actions">
+        <a class="btn secondary" href="{{ url_for('calendar_view') }}">Open Calendar</a>
+        <a class="btn primary big-action-btn" href="{{ url_for('logs') }}">Update Daily Log</a>
+    </div>
+</section>
+
+<section class="focus-layout">
+    <button class="stats-show-btn" id="show-stats-btn" type="button" aria-controls="stats-panel" aria-expanded="true">Show Stats</button>
+
+    <aside class="floating-panel stats-panel" id="stats-panel">
+        <div class="floating-panel-head">
+            <div>
+                <p class="eyebrow">Quick Stats</p>
+                <h2>Today</h2>
+            </div>
+            <button class="panel-toggle-btn" id="hide-stats-btn" type="button">Hide</button>
+        </div>
+
+        <div class="stats-stack">
+            <article class="mini-stat-card">
+                <span class="stat-label">Today's Focus Sessions</span>
+                <strong>{{ today_focus_count }}</strong>
+            </article>
+            <article class="mini-stat-card">
+                <span class="stat-label">Today's Focus Minutes</span>
+                <strong>{{ today_focus_minutes }}</strong>
+            </article>
+            <article class="mini-stat-card">
+                <span class="stat-label">Today's Todo Count</span>
+                <strong>{{ today_tasks|length }}</strong>
+            </article>
+        </div>
+    </aside>
+
+    <article class="card timer-card timer-center-card">
+        <div class="timer-header centered-header">
+            <div>
+                <p class="eyebrow">Main Focus Area</p>
+                <h2>Tomato Clock</h2>
+                <p class="muted">Set your focus and break cycle. Each finished focus round is saved automatically.</p>
+            </div>
+            <div class="pill-group">
+                <span class="pill" id="timer-mode">Focus</span>
+                <span class="pill" id="cycle-count">Cycle 1</span>
+            </div>
+        </div>
+
+        <div class="timer-display hero-timer" id="timer-display">25:00</div>
+
+        <form class="timer-settings spacious-settings" id="pomodoro-form">
+            <label>Focus (minutes)
+                <input type="number" id="focus-minutes" value="25" min="1" max="120">
+            </label>
+            <label>Break (minutes)
+                <input type="number" id="break-minutes" value="5" min="1" max="60">
+            </label>
+        </form>
+
+        <div class="timer-actions">
+            <button class="btn primary" id="start-btn" type="button">Start</button>
+            <button class="btn secondary" id="pause-btn" type="button">Pause</button>
+            <button class="btn secondary" id="reset-btn" type="button">Reset</button>
+        </div>
+        <p class="muted small center-text" id="timer-message">When a focus round ends, it will be saved to the database automatically.</p>
+    </article>
+
+    <aside class="floating-panel todo-panel">
+        <div class="floating-panel-head">
+            <div>
+                <p class="eyebrow">Right Panel</p>
+                <h2>Today's Todo List</h2>
+            </div>
+            <a href="{{ url_for('calendar_view') }}" class="link-btn">View Month</a>
+        </div>
+
+        <form method="post" action="{{ url_for('add_task') }}" class="inline-form todo-inline-form">
+            <input type="hidden" name="task_date" value="{{ today.isoformat() }}">
+            <input type="text" name="title" placeholder="Add today's task" required>
+            <button class="btn primary" type="submit">Add</button>
+        </form>
+
+        <div class="todo-summary-grid">
+            <article class="summary-chip">
+                <span>Today's Focus Sessions</span>
+                <strong>{{ today_focus_count }}</strong>
+            </article>
+            <article class="summary-chip">
+                <span>Today's Focus Minutes</span>
+                <strong>{{ today_focus_minutes }}</strong>
+            </article>
+            <article class="summary-chip">
+                <span>Today's Todo Count</span>
+                <strong>{{ today_tasks|length }}</strong>
+            </article>
+        </div>
+
+        <div class="todo-list compact-todo-list">
+            {% if today_tasks %}
+                {% for task in today_tasks %}
+                    <div class="todo-item {% if task.completed %}done{% endif %}">
+                        <div>
+                            <strong>{{ task.title }}</strong>
+                            {% if task.description %}<p>{{ task.description }}</p>{% endif %}
+                        </div>
+                        <div class="todo-actions">
+                            <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}">
+                                <button class="btn small-btn secondary" type="submit">{% if task.completed %}Undo{% else %}Done{% endif %}</button>
+                            </form>
+                            <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}">
+                                <button class="btn small-btn danger" type="submit">Delete</button>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p class="muted">No tasks for today yet.</p>
+            {% endif %}
+        </div>
+    </aside>
+</section>
+
+<section class="card records-card">
+    <div class="section-title-row records-header-row">
+        <div>
+            <p class="eyebrow">Health Tracking</p>
+            <h2>Recent Daily Records</h2>
+        </div>
+        <div class="header-actions">
+            <a class="link-btn" href="{{ url_for('logs') }}">Manage Records</a>
+            <a class="btn primary big-action-btn" href="{{ url_for('logs') }}">Update Daily Log</a>
+        </div>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Water</th>
+                    <th>Sleep</th>
+                    <th>Quality</th>
+                    <th>Steps</th>
+                    <th>Exercise</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for log in recent_logs %}
+                <tr>
+                    <td>{{ log.log_date }}</td>
+                    <td>{{ log.water_ml }} ml</td>
+                    <td>{{ log.sleep_hours }} h</td>
+                    <td>{{ log.sleep_quality }}</td>
+                    <td>{{ log.steps }}</td>
+                    <td>{{ log.exercise_minutes }} min</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="muted">No daily data yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const timerDisplay = document.getElementById('timer-display');
+const timerMode = document.getElementById('timer-mode');
+const cycleCountText = document.getElementById('cycle-count');
+const timerMessage = document.getElementById('timer-message');
+const focusInput = document.getElementById('focus-minutes');
+const breakInput = document.getElementById('break-minutes');
+const statsPanel = document.getElementById('stats-panel');
+const showStatsBtn = document.getElementById('show-stats-btn');
+const hideStatsBtn = document.getElementById('hide-stats-btn');
+
+let timer = null;
+let remainingSeconds = Number(focusInput.value) * 60;
+let isRunning = false;
+let mode = 'focus';
+let cycleNumber = 1;
+
+function renderTime() {
+    const minutes = String(Math.floor(remainingSeconds / 60)).padStart(2, '0');
+    const seconds = String(remainingSeconds % 60).padStart(2, '0');
+    timerDisplay.textContent = `${minutes}:${seconds}`;
+    timerMode.textContent = mode === 'focus' ? 'Focus' : 'Break';
+    cycleCountText.textContent = `Cycle ${cycleNumber}`;
+}
+
+function setStatsPanelVisibility(isHidden) {
+    if (!statsPanel || !showStatsBtn) return;
+    statsPanel.classList.toggle('is-hidden', isHidden);
+    showStatsBtn.classList.toggle('visible', isHidden);
+    showStatsBtn.setAttribute('aria-expanded', String(!isHidden));
+    localStorage.setItem('wellhabitStatsHidden', isHidden ? '1' : '0');
+}
+
+function resetTimer() {
+    clearInterval(timer);
+    timer = null;
+    isRunning = false;
+    mode = 'focus';
+    cycleNumber = 1;
+    remainingSeconds = Number(focusInput.value || 25) * 60;
+    timerMessage.textContent = 'When a focus round ends, it will be saved to the database automatically.';
+    renderTime();
+}
+
+async function saveSession() {
+    const payload = {
+        focus_minutes: Number(focusInput.value || 25),
+        break_minutes: Number(breakInput.value || 5),
+        cycle_number: cycleNumber,
+    };
+
+    const response = await fetch("{{ url_for('save_pomodoro') }}", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+        timerMessage.textContent = `Cycle ${cycleNumber} focus session saved.`;
+    } else {
+        timerMessage.textContent = 'Session finished, but saving failed.';
+    }
+}
+
+function tick() {
+    if (remainingSeconds > 0) {
+        remainingSeconds -= 1;
+        renderTime();
+        return;
+    }
+
+    clearInterval(timer);
+    timer = null;
+    isRunning = false;
+
+    if (mode === 'focus') {
+        saveSession();
+        mode = 'break';
+        remainingSeconds = Number(breakInput.value || 5) * 60;
+        timerMessage.textContent = `Focus round done. Time for a break.`;
+    } else {
+        mode = 'focus';
+        cycleNumber += 1;
+        remainingSeconds = Number(focusInput.value || 25) * 60;
+        timerMessage.textContent = `Break ended. Start next focus round when ready.`;
+    }
+
+    renderTime();
+}
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    if (isRunning) return;
+    if (remainingSeconds <= 0) {
+        remainingSeconds = Number(mode === 'focus' ? focusInput.value : breakInput.value) * 60;
+    }
+    isRunning = true;
+    timer = setInterval(tick, 1000);
+    timerMessage.textContent = 'Timer is running.';
+});
+
+document.getElementById('pause-btn').addEventListener('click', () => {
+    clearInterval(timer);
+    timer = null;
+    isRunning = false;
+    timerMessage.textContent = 'Timer paused.';
+});
+
+document.getElementById('reset-btn').addEventListener('click', resetTimer);
+focusInput.addEventListener('change', resetTimer);
+breakInput.addEventListener('change', resetTimer);
+
+if (hideStatsBtn && showStatsBtn) {
+    hideStatsBtn.addEventListener('click', () => setStatsPanelVisibility(true));
+    showStatsBtn.addEventListener('click', () => setStatsPanelVisibility(false));
+    const rememberedState = localStorage.getItem('wellhabitStatsHidden') === '1';
+    setStatsPanelVisibility(rememberedState);
+}
+
+renderTime();
+</script>
+{% endblock %}
