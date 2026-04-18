@@ -1,18 +1,21 @@
 {% extends 'base.html' %}
 {% block title %}Daily Log | WellHabit{% endblock %}
 {% block content %}
-<section class="split-grid">
+<section class="split-grid logs-split-grid">
     <article class="card">
         <div class="section-title-row">
-            <h1>Daily Health Record</h1>
-            <span class="muted">Save one record per day</span>
+            <div>
+                <h1>Update Daily Log</h1>
+                <p class="muted">Track your day, write a journal, and note what you just did. Water can be typed as 300 ml, a glass, or a bottle.</p>
+            </div>
+            <span class="muted">One main record per day</span>
         </div>
         <form method="post" class="form-grid two-columns">
             <label>Date
                 <input type="date" name="log_date" value="{{ selected_date.isoformat() }}" required>
             </label>
-            <label>Water (ml)
-                <input type="number" name="water_ml" min="0" value="{{ current_log.water_ml if current_log else 0 }}" required>
+            <label>Water Amount
+                <input type="text" name="water_ml" value="{{ current_log.water_ml if current_log else 0 }}" placeholder="300 ml / a glass / a bottle" required>
             </label>
             <label>Sleep Hours
                 <input type="number" name="sleep_hours" min="0" step="0.5" value="{{ current_log.sleep_hours if current_log else 0 }}" required>
@@ -31,8 +34,14 @@
             <label>Exercise (minutes)
                 <input type="number" name="exercise_minutes" min="0" value="{{ current_log.exercise_minutes if current_log else 0 }}" required>
             </label>
-            <label class="full-width">Notes
-                <textarea name="notes" rows="4" placeholder="Optional notes">{{ current_log.notes if current_log else '' }}</textarea>
+            <label class="full-width">Daily Summary / Journal
+                <textarea name="journal_text" rows="5" placeholder="Write a short diary or summary of your day">{{ current_log.journal_text if current_log else '' }}</textarea>
+            </label>
+            <label class="full-width">What did you just do?
+                <textarea name="activity_text" rows="3" placeholder="Example: I just ate lunch and then sat down to study.">{{ current_log.activity_text if current_log else '' }}</textarea>
+            </label>
+            <label class="full-width">Extra Notes
+                <textarea name="notes" rows="3" placeholder="Optional notes">{{ current_log.notes if current_log else '' }}</textarea>
             </label>
             <button class="btn primary full-width" type="submit">Save Daily Record</button>
         </form>
@@ -43,6 +52,21 @@
             <h2>History</h2>
             <span class="muted">Latest first</span>
         </div>
+
+        {% if current_log and current_log.ai_feedback %}
+            <div class="ai-feedback-box">
+                <p class="eyebrow">Activity Insight</p>
+                <strong>
+                    {% if current_log.ai_meal_detected %}
+                        Meal likely detected ({{ current_log.ai_meal_confidence or 'medium' }})
+                    {% else %}
+                        No meal detected ({{ current_log.ai_meal_confidence or 'low' }})
+                    {% endif %}
+                </strong>
+                <p>{{ current_log.ai_feedback }}</p>
+            </div>
+        {% endif %}
+
         <div class="history-list">
             {% for log in all_logs %}
                 <a class="history-item" href="{{ url_for('logs', date=log.log_date.isoformat()) }}">
@@ -55,4 +79,17 @@
         </div>
     </article>
 </section>
+
+{% include '_hydration_modal.html' %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.WELLHABIT_PROMPTS = {
+    due: {{ due_hydration_prompt|tojson }},
+    upcoming: {{ upcoming_hydration_prompt|tojson }},
+    morningPromptExists: {{ morning_prompt_exists|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='hydration.js') }}"></script>
 {% endblock %}

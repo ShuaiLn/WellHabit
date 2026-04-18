@@ -1,7 +1,7 @@
 from datetime import datetime, date
 
 from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db, login_manager
 
@@ -16,6 +16,7 @@ class User(UserMixin, db.Model):
     daily_logs = db.relationship('DailyLog', backref='user', lazy=True, cascade='all, delete-orphan')
     tasks = db.relationship('Task', backref='user', lazy=True, cascade='all, delete-orphan')
     pomodoro_sessions = db.relationship('PomodoroSession', backref='user', lazy=True, cascade='all, delete-orphan')
+    hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -39,7 +40,15 @@ class DailyLog(db.Model):
     steps = db.Column(db.Integer, nullable=False, default=0)
     exercise_minutes = db.Column(db.Integer, nullable=False, default=0)
     notes = db.Column(db.Text)
+    journal_text = db.Column(db.Text)
+    activity_text = db.Column(db.Text)
+    ai_meal_detected = db.Column(db.Boolean, nullable=False, default=False)
+    ai_meal_confidence = db.Column(db.String(20))
+    ai_feedback = db.Column(db.Text)
+    last_meal_detected_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    hydration_prompts = db.relationship('HydrationPrompt', backref='daily_log', lazy=True)
 
 
 class Task(db.Model):
@@ -59,3 +68,17 @@ class PomodoroSession(db.Model):
     break_minutes = db.Column(db.Integer, nullable=False)
     cycle_number = db.Column(db.Integer, nullable=False, default=1)
     completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class HydrationPrompt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    log_id = db.Column(db.Integer, db.ForeignKey('daily_log.id'))
+    prompt_type = db.Column(db.String(30), nullable=False)
+    message = db.Column(db.Text)
+    beverage = db.Column(db.String(60))
+    custom_beverage = db.Column(db.String(120))
+    response_status = db.Column(db.String(20), nullable=False, default='pending')
+    due_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    responded_at = db.Column(db.DateTime)

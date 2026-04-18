@@ -1,23 +1,17 @@
 {% extends 'base.html' %}
 {% block title %}Home | WellHabit{% endblock %}
 {% block content %}
-<section class="dashboard-topbar">
-    <div>
-        <p class="eyebrow">WellHabit Dashboard</p>
-        <h1>Welcome back, {{ current_user.username }}</h1>
-        <p class="muted">Today is {{ today.strftime('%B %d, %Y') }}</p>
-    </div>
-    <div class="header-actions">
-        <a class="btn secondary" href="{{ url_for('calendar_view') }}">Open Calendar</a>
-        <a class="btn primary big-action-btn" href="{{ url_for('logs') }}">Update Daily Log</a>
-    </div>
+<section class="date-banner-card card">
+    <p class="eyebrow">Today</p>
+    <h1 class="big-date-title">Today is {{ today.strftime('%B %d, %Y') }}</h1>
+    <p class="muted">Stay consistent with your habits, your focus time, and your hydration.</p>
 </section>
 
 <section class="focus-layout">
     <button class="stats-show-btn" id="show-stats-btn" type="button" aria-controls="stats-panel" aria-expanded="true">Show Stats</button>
 
-    <aside class="floating-panel stats-panel" id="stats-panel">
-        <div class="floating-panel-head">
+    <aside class="floating-panel stats-panel compact-stats-panel" id="stats-panel">
+        <div class="floating-panel-head compact-head">
             <div>
                 <p class="eyebrow">Quick Stats</p>
                 <h2>Today</h2>
@@ -25,16 +19,16 @@
             <button class="panel-toggle-btn" id="hide-stats-btn" type="button">Hide</button>
         </div>
 
-        <div class="stats-stack">
-            <article class="mini-stat-card">
+        <div class="stats-stack compact-stats-stack">
+            <article class="mini-stat-card compact-stat-card">
                 <span class="stat-label">Today's Focus Sessions</span>
                 <strong>{{ today_focus_count }}</strong>
             </article>
-            <article class="mini-stat-card">
+            <article class="mini-stat-card compact-stat-card">
                 <span class="stat-label">Today's Focus Minutes</span>
                 <strong>{{ today_focus_minutes }}</strong>
             </article>
-            <article class="mini-stat-card">
+            <article class="mini-stat-card compact-stat-card">
                 <span class="stat-label">Today's Todo Count</span>
                 <strong>{{ today_tasks|length }}</strong>
             </article>
@@ -73,10 +67,10 @@
         <p class="muted small center-text" id="timer-message">When a focus round ends, it will be saved to the database automatically.</p>
     </article>
 
-    <aside class="floating-panel todo-panel">
+    <aside class="floating-panel todo-panel right-todo-panel">
         <div class="floating-panel-head">
             <div>
-                <p class="eyebrow">Right Panel</p>
+                <p class="eyebrow">Today</p>
                 <h2>Today's Todo List</h2>
             </div>
             <a href="{{ url_for('calendar_view') }}" class="link-btn">View Month</a>
@@ -88,37 +82,22 @@
             <button class="btn primary" type="submit">Add</button>
         </form>
 
-        <div class="todo-summary-grid">
-            <article class="summary-chip">
-                <span>Today's Focus Sessions</span>
-                <strong>{{ today_focus_count }}</strong>
-            </article>
-            <article class="summary-chip">
-                <span>Today's Focus Minutes</span>
-                <strong>{{ today_focus_minutes }}</strong>
-            </article>
-            <article class="summary-chip">
-                <span>Today's Todo Count</span>
-                <strong>{{ today_tasks|length }}</strong>
-            </article>
-        </div>
-
         <div class="todo-list compact-todo-list">
             {% if today_tasks %}
                 {% for task in today_tasks %}
-                    <div class="todo-item {% if task.completed %}done{% endif %}">
-                        <div>
-                            <strong>{{ task.title }}</strong>
-                            {% if task.description %}<p>{{ task.description }}</p>{% endif %}
-                        </div>
-                        <div class="todo-actions">
-                            <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}">
-                                <button class="btn small-btn secondary" type="submit">{% if task.completed %}Undo{% else %}Done{% endif %}</button>
-                            </form>
-                            <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}">
-                                <button class="btn small-btn danger" type="submit">Delete</button>
-                            </form>
-                        </div>
+                    <div class="todo-item todo-checkbox-item {% if task.completed %}done{% endif %}">
+                        <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}" class="todo-check-form">
+                            <label class="todo-check-label">
+                                <input type="checkbox" {% if task.completed %}checked{% endif %} onchange="this.form.submit()">
+                                <span>
+                                    <strong>{{ task.title }}</strong>
+                                    {% if task.description %}<small>{{ task.description }}</small>{% endif %}
+                                </span>
+                            </label>
+                        </form>
+                        <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}">
+                            <button class="btn small-btn danger" type="submit">Delete</button>
+                        </form>
                     </div>
                 {% endfor %}
             {% else %}
@@ -168,6 +147,8 @@
         </table>
     </div>
 </section>
+
+{% include '_hydration_modal.html' %}
 {% endblock %}
 
 {% block scripts %}
@@ -224,17 +205,11 @@ async function saveSession() {
 
     const response = await fetch("{{ url_for('save_pomodoro') }}", {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
 
-    if (response.ok) {
-        timerMessage.textContent = `Cycle ${cycleNumber} focus session saved.`;
-    } else {
-        timerMessage.textContent = 'Session finished, but saving failed.';
-    }
+    timerMessage.textContent = response.ok ? `Cycle ${cycleNumber} focus session saved.` : 'Session finished, but saving failed.';
 }
 
 function tick() {
@@ -252,12 +227,12 @@ function tick() {
         saveSession();
         mode = 'break';
         remainingSeconds = Number(breakInput.value || 5) * 60;
-        timerMessage.textContent = `Focus round done. Time for a break.`;
+        timerMessage.textContent = 'Focus round done. Time for a break.';
     } else {
         mode = 'focus';
         cycleNumber += 1;
         remainingSeconds = Number(focusInput.value || 25) * 60;
-        timerMessage.textContent = `Break ended. Start next focus round when ready.`;
+        timerMessage.textContent = 'Break ended. Start next focus round when ready.';
     }
 
     renderTime();
@@ -293,4 +268,13 @@ if (hideStatsBtn && showStatsBtn) {
 
 renderTime();
 </script>
+
+<script>
+window.WELLHABIT_PROMPTS = {
+    due: {{ due_hydration_prompt|tojson }},
+    upcoming: {{ upcoming_hydration_prompt|tojson }},
+    morningPromptExists: {{ morning_prompt_exists|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='hydration.js') }}"></script>
 {% endblock %}

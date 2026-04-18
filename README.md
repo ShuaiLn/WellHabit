@@ -1,24 +1,16 @@
 # WellHabit
 
-A green-themed Flask wellness dashboard with basic register and login functions, a built-in Tomato Clock for focus sessions, daily wellness tracking, and simple task management.
-
-## Features
-
-- Basic user registration and login
-- Green-themed UI
+A green-themed Flask wellness dashboard with:
+- register / login
 - SQLite database
-- Daily log for:
-  - water intake
-  - sleep
-  - exercise
-  - steps
-- Journal and “what did you just do” text input
+- daily log for water, sleep, exercise, steps
+- journal + "what did you just do" text
 - Tomato Clock / Pomodoro tracking
-- Monthly calendar and todo list
-- Today’s todo list on the dashboard
-- Hydration reminder modal
-- Meal detection from activity text using the OpenAI Responses API when `OPENAI_API_KEY` is set
-- Keyword-based fallback meal detection when no API key is available
+- monthly calendar and todo list
+- today's todo list on the dashboard
+- hydration reminder modal
+- meal detection from activity text using the OpenAI Responses API when `OPENAI_API_KEY` is set
+- keyword fallback meal detection when no API key is available
 
 ## Run
 
@@ -27,13 +19,13 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open in your browser:
+Open:
 
 ```bash
 http://127.0.0.1:5000
 ```
 
-## Optional OpenAI Setup
+## Optional OpenAI setup
 
 Windows PowerShell:
 
