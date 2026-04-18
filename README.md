@@ -1,62 +1,50 @@
-# WellnessFlow Flask App
+# WellHabit
 
-一个简洁的 Flask full stack 项目，包含：
+A green-themed Flask wellness dashboard with basic register and login functions, a built-in Tomato Clock for focus sessions, daily wellness tracking, and simple task management.
 
-- 注册 / 登录
-- SQLite 数据库
-- 每日健康记录：
-  - 喝水（ml）
-  - 睡眠（时长 / 质量）
-  - 运动（步数 / 时长）
-- 番茄钟（专注 / 休息循环）
-- 自动记录完成的专注次数和专注时长
-- Calendar 月视图
-- 每日 todo list
-- 首页右侧显示今日 todo list
+## Features
 
-## 运行方式
+- Basic user registration and login
+- Green-themed UI
+- SQLite database
+- Daily log for:
+  - water intake
+  - sleep
+  - exercise
+  - steps
+- Journal and “what did you just do” text input
+- Tomato Clock / Pomodoro tracking
+- Monthly calendar and todo list
+- Today’s todo list on the dashboard
+- Hydration reminder modal
+- Meal detection from activity text using the OpenAI Responses API when `OPENAI_API_KEY` is set
+- Keyword-based fallback meal detection when no API key is available
+
+## Run
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-然后打开浏览器访问：
+Open in your browser:
 
 ```bash
 http://127.0.0.1:5000
 ```
 
-## 项目结构
+## Optional OpenAI Setup
 
-```text
-wellness_tracker_app/
-├── app.py
-├── requirements.txt
-├── README.md
-├── instance/
-└── app/
-    ├── __init__.py
-    ├── models.py
-    ├── routes.py
-    ├── static/
-    │   └── style.css
-    └── templates/
-        ├── base.html
-        ├── index.html
-        ├── login.html
-        ├── register.html
-        ├── dashboard.html
-        ├── logs.html
-        └── calendar.html
+Windows PowerShell:
+
+```powershell
+setx OPENAI_API_KEY "your_api_key_here"
 ```
 
-## 说明
+Then reopen the terminal and run the app again.
 
-- 数据库文件会自动生成在 `instance/wellness.db`
-- 当前版本是简洁实用版，适合继续扩展：
-  - 图表统计
-  - 用户头像
-  - 提醒通知
-  - 番茄钟历史分析
-  - 更完整的 calendar event 系统
+Optional custom model:
+
+```powershell
+setx OPENAI_MODEL "gpt-5.4"
+```
