@@ -11,10 +11,33 @@
     const finishedBtn = document.getElementById('hydration-finished-btn');
     const notYetBtn = document.getElementById('hydration-not-yet-btn');
     const skipBtn = document.getElementById('hydration-skip-btn');
+    const STORAGE_KEY = 'wellhabitActiveHydrationPrompt';
+    const PAUSE_KEY = 'wellhabitHydrationPauseUntil';
+    const STATUS_URL = config.statusUrl || '/hydration/status';
 
     if (!overlay || !titleEl || !messageEl || !beverageEl || !amountEl || !customWrap || !customEl) return;
 
     let activePrompt = null;
+    let upcomingTimerId = null;
+    let pendingRequest = false;
+
+    function persistActivePrompt(prompt) {
+        if (!prompt) {
+            localStorage.removeItem(STORAGE_KEY);
+            return;
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(prompt));
+    }
+
+    function restoreStoredPrompt() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            return JSON.parse(raw);
+        } catch (error) {
+            return null;
+        }
+    }
 
     function toggleCustomInput() {
         const show = beverageEl.value === 'other';
@@ -25,12 +48,35 @@
         }
     }
 
-    function setDefaultAmount(promptType) {
+    function setDefaultAmount() {
         if (amountEl.value.trim()) return;
-        amountEl.value = promptType === 'morning' ? 'a glass' : 'a glass';
+        amountEl.value = 'a glass';
+    }
+
+    function setButtonsDisabled(disabled) {
+        pendingRequest = disabled;
+        [finishedBtn, notYetBtn, skipBtn].forEach((btn) => {
+            if (!btn) return;
+            btn.disabled = disabled;
+            btn.style.opacity = disabled ? '0.7' : '1';
+        });
+    }
+
+    function getPauseUntil() {
+        return Number(sessionStorage.getItem(PAUSE_KEY) || 0);
+    }
+
+    function hydrationPaused() {
+        return getPauseUntil() > Date.now();
     }
 
     function openPrompt(prompt, fallbackType) {
+        if (hydrationPaused()) {
+            persistActivePrompt(prompt);
+            scheduleUpcoming({ due_at_iso: new Date(getPauseUntil() + 250).toISOString() });
+            return;
+        }
+
         activePrompt = prompt || {
             id: null,
             prompt_type: fallbackType || 'morning',
@@ -38,26 +84,64 @@
             beverage: 'water'
         };
 
-        const isMorning = activePrompt.prompt_type === 'morning';
-        eyebrowEl.textContent = isMorning ? 'Morning Boost' : 'Hydration Reminder';
-        titleEl.textContent = isMorning
-            ? 'Drink a glass of water to begin the day.'
-            : 'Better to drink a glass of water.';
+        eyebrowEl.textContent = 'Hydration Reminder';
+        titleEl.textContent = 'Better to drink a glass of water.';
         messageEl.textContent = activePrompt.message || 'Choose what you want to drink, type an amount, then tell WellHabit if you finished it.';
         beverageEl.value = ['water', 'milk', 'coke', 'other'].includes(activePrompt.beverage) ? activePrompt.beverage : 'water';
-        amountEl.value = '';
-        customEl.value = '';
+        amountEl.value = amountEl.value.trim() ? amountEl.value : '';
+        customEl.value = activePrompt.custom_beverage || '';
         toggleCustomInput();
         setDefaultAmount(activePrompt.prompt_type);
+        persistActivePrompt(activePrompt);
         overlay.hidden = false;
     }
 
     function closePrompt() {
         overlay.hidden = true;
+        activePrompt = null;
+        persistActivePrompt(null);
+    }
+
+    function scheduleUpcoming(prompt) {
+        if (upcomingTimerId) {
+            clearTimeout(upcomingTimerId);
+            upcomingTimerId = null;
+        }
+        if (!prompt || !prompt.due_at_iso) return;
+        const delay = new Date(prompt.due_at_iso).getTime() - Date.now();
+        if (delay <= 0 || delay > 12 * 60 * 60 * 1000) return;
+        upcomingTimerId = setTimeout(() => {
+            refreshPromptState();
+        }, delay + 200);
+    }
+
+    async function refreshPromptState() {
+        try {
+            const response = await fetch(STATUS_URL, { headers: { 'Accept': 'application/json' } });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) return;
+
+            config.morningPromptExists = body.morning_prompt_exists;
+            config.upcoming = body.upcoming_prompt;
+
+            if (body.due_prompt) {
+                openPrompt(body.due_prompt, body.due_prompt.prompt_type);
+            } else if (!document.hidden) {
+                if (!pendingRequest) {
+                    closePrompt();
+                }
+            }
+            scheduleUpcoming(body.upcoming_prompt);
+        } catch (error) {
+            const stored = restoreStoredPrompt();
+            if (stored && !overlay.hidden) {
+                openPrompt(stored, stored.prompt_type || 'meal_now');
+            }
+        }
     }
 
     async function sendResponse(status) {
-        if (!activePrompt) return;
+        if (!activePrompt || pendingRequest) return;
 
         if (beverageEl.value === 'other' && !customEl.value.trim()) {
             customEl.focus();
@@ -70,9 +154,10 @@
             beverage: beverageEl.value,
             custom_beverage: customEl.value.trim(),
             amount_text: amountEl.value.trim(),
-            response_status: status,
+            action: status,
         };
 
+        setButtonsDisabled(true);
         try {
             const response = await fetch('/hydration/respond', {
                 method: 'POST',
@@ -88,37 +173,54 @@
                 return;
             }
 
-            closePrompt();
-            setTimeout(() => window.location.reload(), 200);
+            amountEl.value = '';
+            customEl.value = '';
+            if (body.due_prompt) {
+                openPrompt(body.due_prompt, body.due_prompt.prompt_type);
+            } else {
+                closePrompt();
+            }
+            if (body.wellness_feedback && window.WellHabitShowWellnessFeedback) {
+                window.WellHabitShowWellnessFeedback(body.wellness_feedback);
+            }
+            scheduleUpcoming(body.upcoming_prompt);
         } catch (error) {
             console.error('Hydration response failed', error);
             alert('Saving the hydration response failed. Please try again.');
+        } finally {
+            setButtonsDisabled(false);
         }
     }
+
+
+    window.WellHabitHydrationStorePrompt = function (prompt) {
+        persistActivePrompt(prompt);
+    };
+
+    window.WellHabitHydrationOpenPrompt = function (prompt) {
+        if (prompt) {
+            openPrompt(prompt, prompt.prompt_type || 'planned_hydration');
+        }
+    };
 
     beverageEl.addEventListener('change', toggleCustomInput);
     finishedBtn.addEventListener('click', () => sendResponse('done'));
     notYetBtn.addEventListener('click', () => sendResponse('not_yet'));
     skipBtn.addEventListener('click', () => sendResponse('skipped'));
 
-    const due = config.due;
-    const upcoming = config.upcoming;
-    const currentHour = new Date().getHours();
-    const shouldShowMorning = !config.morningPromptExists && currentHour >= 5 && currentHour < 12;
-
-    if (due) {
-        openPrompt(due, due.prompt_type);
-        return;
+    const stored = restoreStoredPrompt();
+    if (stored) {
+        openPrompt(stored, stored.prompt_type || 'meal_now');
     }
 
-    if (shouldShowMorning) {
-        openPrompt(null, 'morning');
+    if (config.due) {
+        openPrompt(config.due, config.due.prompt_type);
     }
 
-    if (upcoming && upcoming.due_at_iso) {
-        const delay = new Date(upcoming.due_at_iso).getTime() - Date.now();
-        if (delay > 0 && delay < 12 * 60 * 60 * 1000) {
-            setTimeout(() => openPrompt(upcoming, upcoming.prompt_type), delay);
-        }
-    }
+    scheduleUpcoming(config.upcoming);
+    refreshPromptState();
+    window.addEventListener('focus', refreshPromptState);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refreshPromptState();
+    });
 })();

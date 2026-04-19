@@ -1,97 +1,72 @@
 {% extends 'base.html' %}
 {% block title %}Home | WellHabit{% endblock %}
 {% block content %}
-<section class="date-banner-card card">
-    <p class="eyebrow">Today</p>
-    <h1 class="big-date-title">Today is {{ today.strftime('%B %d, %Y') }}</h1>
-    <p class="muted">Stay consistent with your habits, your focus time, and your hydration.</p>
-</section>
-
-<section class="focus-layout">
-    <button class="stats-show-btn" id="show-stats-btn" type="button" aria-controls="stats-panel" aria-expanded="true">Show Stats</button>
-
-    <aside class="floating-panel stats-panel compact-stats-panel" id="stats-panel">
-        <div class="floating-panel-head compact-head">
-            <div>
-                <p class="eyebrow">Quick Stats</p>
-                <h2>Today</h2>
-            </div>
-            <button class="panel-toggle-btn" id="hide-stats-btn" type="button">Hide</button>
+<section class="dashboard-hero-grid home-dashboard-grid">
+    <article class="card timer-card home-timer-card">
+        <div class="home-card-topline">
+            <span class="soft-badge">Main Focus</span>
+            <span class="soft-status" id="timer-mode">Focus</span>
         </div>
-
-        <div class="stats-stack compact-stats-stack">
-            <article class="mini-stat-card compact-stat-card">
-                <span class="stat-label">Today's Focus Sessions</span>
-                <strong>{{ today_focus_count }}</strong>
-            </article>
-            <article class="mini-stat-card compact-stat-card">
-                <span class="stat-label">Today's Focus Minutes</span>
-                <strong>{{ today_focus_minutes }}</strong>
-            </article>
-            <article class="mini-stat-card compact-stat-card">
-                <span class="stat-label">Today's Todo Count</span>
-                <strong>{{ today_tasks|length }}</strong>
-            </article>
-        </div>
-    </aside>
-
-    <article class="card timer-card timer-center-card">
-        <div class="timer-header centered-header">
+        <div class="home-card-head compact-home-head">
             <div>
-                <p class="eyebrow">Main Focus Area</p>
                 <h2>Tomato Clock</h2>
-                <p class="muted">Set your focus and break cycle. Each finished focus round is saved automatically.</p>
+                <p class="muted">Stay focused, and each completed round is saved to your calendar and history automatically.</p>
             </div>
-            <div class="pill-group">
-                <span class="pill" id="timer-mode">Focus</span>
-                <span class="pill" id="cycle-count">Cycle 1</span>
-            </div>
+            <div class="cycle-chip" id="cycle-count">Cycle 1</div>
         </div>
 
-        <div class="timer-display hero-timer" id="timer-display">25:00</div>
+        <div class="timer-display home-hero-timer" id="timer-display">25:00</div>
 
-        <form class="timer-settings spacious-settings" id="pomodoro-form">
+        <form class="timer-settings home-timer-settings" id="pomodoro-form">
             <label>Focus (minutes)
                 <input type="number" id="focus-minutes" value="25" min="1" max="120">
             </label>
             <label>Break (minutes)
                 <input type="number" id="break-minutes" value="5" min="1" max="60">
             </label>
+            <label class="full-width">What are you doing now?
+                <input type="text" id="pomodoro-activity" value="work" placeholder="work">
+            </label>
         </form>
 
-        <div class="timer-actions">
-            <button class="btn primary" id="start-btn" type="button">Start</button>
+        <div class="timer-actions home-timer-actions">
+            <button class="btn primary home-primary-btn" id="start-btn" type="button">Start Focus</button>
             <button class="btn secondary" id="pause-btn" type="button">Pause</button>
             <button class="btn secondary" id="reset-btn" type="button">Reset</button>
         </div>
-        <p class="muted small center-text" id="timer-message">When a focus round ends, it will be saved to the database automatically.</p>
+        <p class="muted small center-text home-timer-note" id="timer-message">When a focus round ends, it will be saved automatically.</p>
     </article>
 
-    <aside class="floating-panel todo-panel right-todo-panel">
-        <div class="floating-panel-head">
-            <div>
-                <p class="eyebrow">Today</p>
-                <h2>Today's Todo List</h2>
-            </div>
+    <article class="card home-todo-card">
+        <div class="home-card-topline">
+            <span class="soft-badge">Today</span>
             <a href="{{ url_for('calendar_view') }}" class="link-btn">View Month</a>
         </div>
+        <div class="home-card-head">
+            <div>
+                <h2>Today's Todo List</h2>
+                <p class="muted">Tap a meal task to log it. Double-click a regular task to edit it.</p>
+            </div>
+            <div class="todo-count-chip">{{ today_tasks|length }} tasks</div>
+        </div>
 
-        <form method="post" action="{{ url_for('add_task') }}" class="inline-form todo-inline-form">
+        <form method="post" action="{{ url_for('add_task') }}" class="inline-form todo-inline-form home-add-task-form">
             <input type="hidden" name="task_date" value="{{ today.isoformat() }}">
             <input type="text" name="title" placeholder="Add today's task" required>
             <button class="btn primary" type="submit">Add</button>
         </form>
 
-        <div class="todo-list compact-todo-list">
+        <div class="todo-list home-todo-list" id="dashboard-todo-list" data-reorder-url="{{ url_for('reorder_tasks') }}" data-task-date="{{ today.isoformat() }}">
             {% if today_tasks %}
                 {% for task in today_tasks %}
-                    <div class="todo-item todo-checkbox-item {% if task.completed %}done{% endif %}">
+                    <div class="todo-item todo-checkbox-item draggable-todo home-todo-item {% if task.completed %}done{% endif %}" data-task-id="{{ task.id }}" data-task-type="{{ task.task_type or 'regular' }}" data-edit-url="{{ url_for('edit_task', task_id=task.id) }}" data-meal-url="{{ url_for('update_meal_task', task_id=task.id) }}" draggable="true">
+                        <button class="drag-handle" type="button" aria-label="Drag to reorder">⋮⋮</button>
                         <form method="post" action="{{ url_for('toggle_task', task_id=task.id) }}" class="todo-check-form">
                             <label class="todo-check-label">
-                                <input type="checkbox" {% if task.completed %}checked{% endif %} onchange="this.form.submit()">
+                                <input type="checkbox" {% if task.completed %}checked{% endif %} {% if (task.task_type or 'regular') == 'meal' %}data-meal-toggle="1"{% else %}onchange="this.form.submit()"{% endif %}>
                                 <span>
                                     <strong>{{ task.title }}</strong>
-                                    {% if task.description %}<small>{{ task.description }}</small>{% endif %}
+                                    {% if task.description and 'auto-added from what just did' not in task.description|lower %}<small class="task-description">{{ task.description }}</small>{% endif %}
                                 </span>
                             </label>
                         </form>
@@ -101,180 +76,383 @@
                     </div>
                 {% endfor %}
             {% else %}
-                <p class="muted">No tasks for today yet.</p>
+                <div class="home-empty-state">
+                    <p class="muted">No tasks for today yet.</p>
+                </div>
             {% endif %}
         </div>
-    </aside>
+    </article>
 </section>
 
-<section class="card records-card">
-    <div class="section-title-row records-header-row">
-        <div>
-            <p class="eyebrow">Health Tracking</p>
-            <h2>Recent Daily Records</h2>
+<section class="split-grid logs-split-grid dashboard-bottom-grid">
+    <article class="card records-card">
+        <div class="section-title-row records-header-row">
+            <div>
+                <p class="eyebrow">Health Tracking</p>
+                <h2>Recent Daily Records</h2>
+            </div>
+            <div class="header-actions">
+                <a class="link-btn" href="{{ url_for('logs') }}">Manage Records</a>
+                <a class="btn primary big-action-btn" href="{{ url_for('logs') }}">Update Daily Log</a>
+            </div>
         </div>
-        <div class="header-actions">
-            <a class="link-btn" href="{{ url_for('logs') }}">Manage Records</a>
-            <a class="btn primary big-action-btn" href="{{ url_for('logs') }}">Update Daily Log</a>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Water</th>
+                        <th>Sleep</th>
+                        <th>Steps</th>
+                        <th>Exercise</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for log in recent_logs %}
+                    <tr>
+                        <td>{{ log.log_date }}</td>
+                        <td>{{ log.water_ml }} ml</td>
+                        <td>{{ log.sleep_hours }} h</td>
+                        <td>{{ log.steps }}</td>
+                        <td>{{ log.exercise_minutes }} min</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="5" class="muted">No daily data yet.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
-    </div>
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Water</th>
-                    <th>Sleep</th>
-                    <th>Quality</th>
-                    <th>Steps</th>
-                    <th>Exercise</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for log in recent_logs %}
-                <tr>
-                    <td>{{ log.log_date }}</td>
-                    <td>{{ log.water_ml }} ml</td>
-                    <td>{{ log.sleep_hours }} h</td>
-                    <td>{{ log.sleep_quality }}</td>
-                    <td>{{ log.steps }}</td>
-                    <td>{{ log.exercise_minutes }} min</td>
-                </tr>
+    </article>
+
+    <article class="card history-preview-card">
+        <div class="section-title-row">
+            <div>
+                <p class="eyebrow">Recent</p>
+                <h2>Activity History</h2>
+            </div>
+            <a class="link-btn" href="{{ url_for('history_view') }}">Open All</a>
+        </div>
+        <div class="history-list">
+            {% for entry in recent_activity_entries %}
+                <div class="history-item">
+                    <strong>{{ entry.title }}</strong>
+                    <span>{{ entry.event_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% if entry.description %}<p>{{ entry.description }}</p>{% endif %}
+                </div>
             {% else %}
-                <tr><td colspan="6" class="muted">No daily data yet.</td></tr>
+                <p class="muted">No activity yet.</p>
             {% endfor %}
-            </tbody>
-        </table>
-    </div>
+        </div>
+    </article>
 </section>
 
-{% include '_hydration_modal.html' %}
+<div class="habit-modal-overlay" id="meal-modal-overlay" hidden>
+    <div class="habit-modal-card meal-modal-card">
+        <p class="eyebrow">Meal Task</p>
+        <h2 id="meal-modal-title">Meal</h2>
+        <p class="muted">Choose finished or skipped, then save what you ate and the meal time.</p>
+        <div class="hydration-choice-grid">
+            <label>Status
+                <select id="meal-status">
+                    <option value="finished">Finished</option>
+                    <option value="skipped">Skipped</option>
+                </select>
+            </label>
+            <label>What did you eat?
+                <input type="text" id="meal-text" placeholder="Example: rice, eggs, noodles">
+            </label>
+            <label>Meal time
+                <input type="time" id="meal-time">
+            </label>
+        </div>
+        <div class="modal-actions big-modal-actions">
+            <button class="btn secondary" type="button" id="meal-cancel-btn">Cancel</button>
+            <button class="btn primary" type="button" id="meal-save-btn">Save Meal</button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+window.WELLHABIT_PROMPTS = {
+    due: {{ due_hydration_prompt|tojson }},
+    upcoming: {{ upcoming_hydration_prompt|tojson }},
+    morningPromptExists: {{ morning_prompt_exists|tojson }},
+    statusUrl: {{ url_for('hydration_status')|tojson }},
+    sleepStatusUrl: {{ url_for('sleep_status')|tojson }}
+};
+
 const timerDisplay = document.getElementById('timer-display');
 const timerMode = document.getElementById('timer-mode');
 const cycleCountText = document.getElementById('cycle-count');
 const timerMessage = document.getElementById('timer-message');
 const focusInput = document.getElementById('focus-minutes');
 const breakInput = document.getElementById('break-minutes');
-const statsPanel = document.getElementById('stats-panel');
-const showStatsBtn = document.getElementById('show-stats-btn');
-const hideStatsBtn = document.getElementById('hide-stats-btn');
+const activityInput = document.getElementById('pomodoro-activity');
+const timerManager = window.WellHabitTimer;
 
-let timer = null;
-let remainingSeconds = Number(focusInput.value) * 60;
-let isRunning = false;
-let mode = 'focus';
-let cycleNumber = 1;
+function renderTimerState(state) {
+    if (!timerManager) return;
+    const remainingSeconds = timerManager.getRemainingSeconds(state);
+    timerDisplay.textContent = timerManager.formatSeconds(remainingSeconds);
+    timerMode.textContent = state.mode === 'focus' ? 'Focus' : 'Break';
+    cycleCountText.textContent = `Cycle ${state.cycleNumber}`;
+    timerMessage.textContent = state.lastMessage || 'When a focus round ends, it will be saved automatically.';
 
-function renderTime() {
-    const minutes = String(Math.floor(remainingSeconds / 60)).padStart(2, '0');
-    const seconds = String(remainingSeconds % 60).padStart(2, '0');
-    timerDisplay.textContent = `${minutes}:${seconds}`;
-    timerMode.textContent = mode === 'focus' ? 'Focus' : 'Break';
-    cycleCountText.textContent = `Cycle ${cycleNumber}`;
-}
-
-function setStatsPanelVisibility(isHidden) {
-    if (!statsPanel || !showStatsBtn) return;
-    statsPanel.classList.toggle('is-hidden', isHidden);
-    showStatsBtn.classList.toggle('visible', isHidden);
-    showStatsBtn.setAttribute('aria-expanded', String(!isHidden));
-    localStorage.setItem('wellhabitStatsHidden', isHidden ? '1' : '0');
-}
-
-function resetTimer() {
-    clearInterval(timer);
-    timer = null;
-    isRunning = false;
-    mode = 'focus';
-    cycleNumber = 1;
-    remainingSeconds = Number(focusInput.value || 25) * 60;
-    timerMessage.textContent = 'When a focus round ends, it will be saved to the database automatically.';
-    renderTime();
-}
-
-async function saveSession() {
-    const payload = {
-        focus_minutes: Number(focusInput.value || 25),
-        break_minutes: Number(breakInput.value || 5),
-        cycle_number: cycleNumber,
-    };
-
-    const response = await fetch("{{ url_for('save_pomodoro') }}", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-
-    timerMessage.textContent = response.ok ? `Cycle ${cycleNumber} focus session saved.` : 'Session finished, but saving failed.';
-}
-
-function tick() {
-    if (remainingSeconds > 0) {
-        remainingSeconds -= 1;
-        renderTime();
-        return;
+    if (document.activeElement !== focusInput) {
+        focusInput.value = state.focusMinutes;
     }
-
-    clearInterval(timer);
-    timer = null;
-    isRunning = false;
-
-    if (mode === 'focus') {
-        saveSession();
-        mode = 'break';
-        remainingSeconds = Number(breakInput.value || 5) * 60;
-        timerMessage.textContent = 'Focus round done. Time for a break.';
-    } else {
-        mode = 'focus';
-        cycleNumber += 1;
-        remainingSeconds = Number(focusInput.value || 25) * 60;
-        timerMessage.textContent = 'Break ended. Start next focus round when ready.';
+    if (document.activeElement !== breakInput) {
+        breakInput.value = state.breakMinutes;
     }
+    if (document.activeElement !== activityInput) {
+        activityInput.value = state.activityLabel || 'work';
+    }
+}
 
-    renderTime();
+if (timerManager) {
+    timerManager.subscribe(renderTimerState);
+    timerManager.refresh();
 }
 
 document.getElementById('start-btn').addEventListener('click', () => {
-    if (isRunning) return;
-    if (remainingSeconds <= 0) {
-        remainingSeconds = Number(mode === 'focus' ? focusInput.value : breakInput.value) * 60;
-    }
-    isRunning = true;
-    timer = setInterval(tick, 1000);
-    timerMessage.textContent = 'Timer is running.';
+    timerManager?.start({
+        focusMinutes: Number(focusInput.value || 25),
+        breakMinutes: Number(breakInput.value || 5),
+        activityLabel: (activityInput.value || 'work').trim() || 'work',
+    });
 });
 
 document.getElementById('pause-btn').addEventListener('click', () => {
-    clearInterval(timer);
-    timer = null;
-    isRunning = false;
-    timerMessage.textContent = 'Timer paused.';
+    timerManager?.pause();
 });
 
-document.getElementById('reset-btn').addEventListener('click', resetTimer);
-focusInput.addEventListener('change', resetTimer);
-breakInput.addEventListener('change', resetTimer);
+document.getElementById('reset-btn').addEventListener('click', () => {
+    timerManager?.reset({
+        focusMinutes: Number(focusInput.value || 25),
+        breakMinutes: Number(breakInput.value || 5),
+        activityLabel: (activityInput.value || 'work').trim() || 'work',
+    });
+});
 
-if (hideStatsBtn && showStatsBtn) {
-    hideStatsBtn.addEventListener('click', () => setStatsPanelVisibility(true));
-    showStatsBtn.addEventListener('click', () => setStatsPanelVisibility(false));
-    const rememberedState = localStorage.getItem('wellhabitStatsHidden') === '1';
-    setStatsPanelVisibility(rememberedState);
+focusInput.addEventListener('change', () => {
+    timerManager?.reset({
+        focusMinutes: Number(focusInput.value || 25),
+        breakMinutes: Number(breakInput.value || 5),
+        activityLabel: (activityInput.value || 'work').trim() || 'work',
+    });
+});
+
+breakInput.addEventListener('change', () => {
+    timerManager?.reset({
+        focusMinutes: Number(focusInput.value || 25),
+        breakMinutes: Number(breakInput.value || 5),
+        activityLabel: (activityInput.value || 'work').trim() || 'work',
+    });
+});
+
+activityInput.addEventListener('input', () => {
+    timerManager?.configure({
+        activityLabel: (activityInput.value || 'work').trim() || 'work',
+    });
+});
+
+const todoListEl = document.getElementById('dashboard-todo-list');
+if (todoListEl) {
+    let draggedEl = null;
+
+    const getDraggableItems = () => Array.from(todoListEl.querySelectorAll('.draggable-todo'));
+
+    function persistTodoOrder() {
+        const taskIds = getDraggableItems().map((item) => Number(item.dataset.taskId));
+        fetch(todoListEl.dataset.reorderUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                task_ids: taskIds,
+                task_date: todoListEl.dataset.taskDate,
+            }),
+        }).catch(() => {
+            timerMessage.textContent = 'The task order changed on screen, but saving failed.';
+        });
+    }
+
+    getDraggableItems().forEach((item) => {
+        item.addEventListener('dragstart', (event) => {
+            if (event.target.closest('input, form, a, textarea')) {
+                event.preventDefault();
+                return;
+            }
+            draggedEl = item;
+            item.classList.add('is-dragging');
+        });
+
+        item.addEventListener('dragend', () => {
+            item.classList.remove('is-dragging');
+            draggedEl = null;
+            persistTodoOrder();
+        });
+
+        item.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            const currentTarget = item;
+            if (!draggedEl || draggedEl === currentTarget) return;
+            const rect = currentTarget.getBoundingClientRect();
+            const insertAfter = (event.clientY - rect.top) > (rect.height / 2);
+            if (insertAfter) {
+                currentTarget.after(draggedEl);
+            } else {
+                currentTarget.before(draggedEl);
+            }
+        });
+    });
+
+
+    getDraggableItems().forEach((item) => {
+        const titleEl = item.querySelector('strong');
+        const handle = item.querySelector('.drag-handle');
+        const checkbox = item.querySelector('input[type="checkbox"]');
+        const isMealTask = item.dataset.taskType === 'meal';
+        let holdTimer = null;
+
+        let lastTapAt = 0;
+        const runEdit = async () => {
+            if (isMealTask) {
+                if (!item.classList.contains('done')) openMealModal(item);
+                return;
+            }
+            const currentTitle = titleEl.textContent.trim();
+            const updatedTitle = window.prompt('Edit task', currentTitle);
+            if (updatedTitle === null) return;
+            const cleanTitle = updatedTitle.trim();
+            if (!cleanTitle || cleanTitle === currentTitle) return;
+
+            try {
+                const response = await fetch(item.dataset.editUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: cleanTitle }),
+                });
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    alert(body.message || 'Updating the task failed.');
+                    return;
+                }
+                titleEl.textContent = body.title || cleanTitle;
+            } catch (error) {
+                alert('Updating the task failed.');
+            }
+        };
+
+        if (isMealTask) {
+            checkbox?.addEventListener('click', (event) => {
+                event.preventDefault();
+                if (!item.classList.contains('done')) openMealModal(item);
+            });
+            titleEl?.addEventListener('click', () => {
+                if (!item.classList.contains('done')) openMealModal(item);
+            });
+        } else {
+            titleEl?.addEventListener('dblclick', runEdit);
+            titleEl?.addEventListener('click', () => {
+                const now = Date.now();
+                if (now - lastTapAt < 400) {
+                    runEdit();
+                }
+                lastTapAt = now;
+            });
+        }
+
+        if (handle) {
+            item.draggable = false;
+            const enableDrag = () => {
+                item.draggable = true;
+                item.classList.add('drag-armed');
+            };
+            const disableDrag = () => {
+                item.draggable = false;
+                item.classList.remove('drag-armed');
+            };
+
+            handle.addEventListener('pointerdown', () => {
+                holdTimer = window.setTimeout(enableDrag, 350);
+            });
+            ['pointerup', 'pointerleave', 'pointercancel'].forEach((evt) => {
+                handle.addEventListener(evt, () => {
+                    if (holdTimer) {
+                        window.clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                });
+            });
+            item.addEventListener('dragend', disableDrag);
+        }
+    });
+
+    const mealOverlay = document.getElementById('meal-modal-overlay');
+    const mealTitleEl = document.getElementById('meal-modal-title');
+    const mealStatusEl = document.getElementById('meal-status');
+    const mealTextEl = document.getElementById('meal-text');
+    const mealTimeEl = document.getElementById('meal-time');
+    const mealSaveBtn = document.getElementById('meal-save-btn');
+    const mealCancelBtn = document.getElementById('meal-cancel-btn');
+    let activeMealItem = null;
+
+    const nowTimeValue = () => {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+    };
+
+    function openMealModal(item) {
+        activeMealItem = item;
+        mealTitleEl.textContent = item.querySelector('strong')?.textContent?.trim() || 'Meal';
+        mealStatusEl.value = 'finished';
+        mealTextEl.value = '';
+        mealTimeEl.value = nowTimeValue();
+        mealOverlay.hidden = false;
+    }
+
+    function closeMealModal() {
+        mealOverlay.hidden = true;
+        activeMealItem = null;
+    }
+
+    mealCancelBtn?.addEventListener('click', closeMealModal);
+    mealOverlay?.addEventListener('click', (event) => {
+        if (event.target === mealOverlay) closeMealModal();
+    });
+
+    mealSaveBtn?.addEventListener('click', async () => {
+        if (!activeMealItem) return;
+        try {
+            const response = await fetch(activeMealItem.dataset.mealUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    meal_status: mealStatusEl.value,
+                    meal_text: mealTextEl.value.trim(),
+                    meal_time: mealTimeEl.value,
+                }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                alert(body.message || 'Saving the meal failed.');
+                return;
+            }
+            if (body.due_prompt && window.WellHabitHydrationStorePrompt) {
+                window.WellHabitHydrationStorePrompt(body.due_prompt);
+            }
+            closeMealModal();
+            window.location.reload();
+        } catch (error) {
+            alert('Saving the meal failed.');
+        }
+    });
+
 }
-
-renderTime();
 </script>
-
-<script>
-window.WELLHABIT_PROMPTS = {
-    due: {{ due_hydration_prompt|tojson }},
-    upcoming: {{ upcoming_hydration_prompt|tojson }},
-    morningPromptExists: {{ morning_prompt_exists|tojson }}
-};
-</script>
-<script src="{{ url_for('static', filename='hydration.js') }}"></script>
 {% endblock %}

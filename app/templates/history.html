@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}History | WellHabit{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>Recent Activity History</h1>
+        <p class="muted">This page shows your recent saved actions across daily logs, hydration, calendar, tasks, and tomato clock sessions.</p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="history-list history-page-list">
+        {% for entry in entries %}
+            <article class="history-item history-entry-card history-impact-card">
+                <div class="history-main-col">
+                    <div class="history-entry-top">
+                        <strong>{{ entry.row.title }}</strong>
+                        <span class="pill">{{ entry.row.entry_type.replace('_', ' ') }}</span>
+                    </div>
+                    <span class="muted small">{{ entry.row.event_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    {% if entry.description %}<p>{{ entry.description }}</p>{% endif %}
+                </div>
+                <aside class="history-impact-box">
+                    <p class="eyebrow">AI impact</p>
+                    <div class="history-impact-grid">
+                        {% for impact in entry.impacts %}
+                            <div class="history-impact-row">
+                                <span>{{ impact.label }}</span>
+                                <strong class="{% if impact.value > 0 %}impact-plus{% elif impact.value < 0 %}impact-minus{% else %}impact-zero{% endif %}">{{ impact.signed }}</strong>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </aside>
+            </article>
+        {% else %}
+            <p class="muted">No activity history yet.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

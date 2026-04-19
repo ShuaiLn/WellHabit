@@ -13,10 +13,32 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
+    age = db.Column(db.Integer)
+    gender_identity = db.Column(db.String(30))
+    weight_kg = db.Column(db.Float)
+    height_cm = db.Column(db.Float)
+    daily_water_goal_ml = db.Column(db.Integer, nullable=False, default=2000)
+    daily_sleep_goal_hours = db.Column(db.Float, nullable=False, default=8.0)
+    daily_step_goal = db.Column(db.Integer, nullable=False, default=8000)
+    daily_exercise_goal_minutes = db.Column(db.Integer, nullable=False, default=30)
+    optimal_bedtime = db.Column(db.String(5))
+    optimal_wake_time = db.Column(db.String(5))
+
+    hydration_score = db.Column(db.Integer, nullable=False, default=50)
+    energy_score = db.Column(db.Integer, nullable=False, default=50)
+    fitness_score = db.Column(db.Integer, nullable=False, default=50)
+    focus_score = db.Column(db.Integer, nullable=False, default=50)
+    mood_score = db.Column(db.Integer, nullable=False, default=50)
+    overall_wellness_score = db.Column(db.Integer, nullable=False, default=50)
+    wellness_summary = db.Column(db.Text)
+    wellness_updated_at = db.Column(db.DateTime)
+
     daily_logs = db.relationship('DailyLog', backref='user', lazy=True, cascade='all, delete-orphan')
     tasks = db.relationship('Task', backref='user', lazy=True, cascade='all, delete-orphan')
+    calendar_events = db.relationship('CalendarEvent', backref='user', lazy=True, cascade='all, delete-orphan')
     pomodoro_sessions = db.relationship('PomodoroSession', backref='user', lazy=True, cascade='all, delete-orphan')
     hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy=True, cascade='all, delete-orphan')
+    activity_entries = db.relationship('ActivityEntry', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -56,8 +78,21 @@ class Task(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
+    task_type = db.Column(db.String(30), nullable=False, default='regular')
     task_date = db.Column(db.Date, nullable=False, index=True)
     completed = db.Column(db.Boolean, default=False, nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    completed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CalendarEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    event_date = db.Column(db.Date, nullable=False, index=True)
+    event_time = db.Column(db.Time)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -67,6 +102,7 @@ class PomodoroSession(db.Model):
     focus_minutes = db.Column(db.Integer, nullable=False)
     break_minutes = db.Column(db.Integer, nullable=False)
     cycle_number = db.Column(db.Integer, nullable=False, default=1)
+    activity_label = db.Column(db.String(200))
     completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
@@ -82,3 +118,12 @@ class HydrationPrompt(db.Model):
     due_at = db.Column(db.DateTime, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     responded_at = db.Column(db.DateTime)
+
+
+class ActivityEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    entry_type = db.Column(db.String(50), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    event_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)

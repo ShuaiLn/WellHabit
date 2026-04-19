@@ -11,20 +11,25 @@
         <div class="container nav-inner">
             <div class="nav-left-zone">
                 <a class="brand" href="{{ url_for('index') }}">WellHabit</a>
-                {% if current_user.is_authenticated %}
-                    <div class="welcome-pill">Welcome back, <strong>{{ current_user.username }}</strong></div>
-                {% endif %}
             </div>
 
             <div class="nav-right-zone">
                 <div class="nav-clock" id="nav-local-time-wrap">
-                    <strong id="nav-local-time">{{ nav_local_time }}</strong>
+                    <div class="nav-clock-stack">
+                        <strong id="nav-local-time">{{ nav_local_time }}</strong>
+                        <span>{{ nav_local_date }}</span>
+                    </div>
                 </div>
+                {% if current_user.is_authenticated %}
+                    <span class="welcome-pill">Welcome back, {{ current_user.username }}</span>
+                {% endif %}
                 <div class="nav-links">
                     {% if current_user.is_authenticated %}
                         <a href="{{ url_for('dashboard') }}">Home</a>
                         <a href="{{ url_for('logs') }}">Daily Log</a>
                         <a href="{{ url_for('calendar_view') }}">Calendar</a>
+                        <a href="{{ url_for('history_view') }}">History</a>
+                        <a href="{{ url_for('profile') }}">Profile</a>
                         <a href="{{ url_for('logout') }}">Logout</a>
                     {% else %}
                         <a href="{{ url_for('login') }}">Login</a>
@@ -34,6 +39,49 @@
             </div>
         </div>
     </nav>
+
+    {% if current_user.is_authenticated %}
+    <div class="global-timer-widget" id="global-timer-widget" hidden>
+        <div class="global-timer-head">
+            <div>
+                <p class="global-timer-kicker">Tomato Clock</p>
+                <strong id="global-timer-mode">Focus</strong>
+            </div>
+            <a href="{{ url_for('dashboard') }}" class="global-timer-link">Open</a>
+        </div>
+        <div class="global-timer-time" id="global-timer-time">25:00</div>
+        <div class="global-timer-activity" id="global-timer-activity">work</div>
+        <p class="global-timer-status" id="global-timer-status">Running</p>
+    </div>
+    {% endif %}
+
+
+{% if current_user.is_authenticated %}
+<div class="sleep-reminder-overlay" id="sleep-reminder-overlay" hidden>
+    <div class="sleep-reminder-card">
+        <p class="eyebrow">Sleep Reminder</p>
+        <h2>It is your suggested bedtime.</h2>
+        <p class="muted" id="sleep-reminder-message">Best bedtime is now. Your suggested wake-up time will be shown here.</p>
+        <div class="modal-actions big-modal-actions">
+            <button class="btn primary" type="button" id="sleep-reminder-ok-btn">Okay</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="wellness-feedback-overlay" id="wellness-feedback-overlay" hidden>
+    <div class="wellness-feedback-card">
+        <p class="eyebrow" id="wellness-feedback-eyebrow">AI Wellness Update</p>
+        <h2 id="wellness-feedback-title">Scores updated</h2>
+        <p class="muted" id="wellness-feedback-message">Your wellness scores were refreshed.</p>
+        <div class="wellness-feedback-metrics" id="wellness-feedback-metrics"></div>
+        <div class="modal-actions big-modal-actions">
+            <button class="btn primary" type="button" id="wellness-feedback-ok-btn">Okay</button>
+        </div>
+    </div>
+</div>
+{% endif %}
 
     <main class="container page">
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -49,23 +97,415 @@
         {% block content %}{% endblock %}
     </main>
 
+    {% if current_user.is_authenticated %}
+        {% include '_hydration_modal.html' %}
+    {% endif %}
+
+
     <script>
     (function () {
         const timeEl = document.getElementById('nav-local-time');
-        if (!timeEl) return;
 
         function updateLocalTime() {
+            if (!timeEl) return;
             const now = new Date();
             timeEl.textContent = now.toLocaleTimeString([], {
                 hour: 'numeric',
-                minute: '2-digit'
+                minute: '2-digit',
+                second: '2-digit'
             });
         }
 
         updateLocalTime();
         setInterval(updateLocalTime, 1000);
     })();
+
+    {% if current_user.is_authenticated %}
+    window.WellHabitShowWellnessFeedback = (function () {
+        const overlay = document.getElementById('wellness-feedback-overlay');
+        const titleEl = document.getElementById('wellness-feedback-title');
+        const eyebrowEl = document.getElementById('wellness-feedback-eyebrow');
+        const messageEl = document.getElementById('wellness-feedback-message');
+        const metricsEl = document.getElementById('wellness-feedback-metrics');
+        const okBtn = document.getElementById('wellness-feedback-ok-btn');
+
+        function hide() {
+            if (overlay) overlay.hidden = true;
+        }
+
+        function renderMetrics(metrics) {
+            if (!metricsEl) return;
+            metricsEl.innerHTML = '';
+            (metrics || []).forEach((item) => {
+                const chip = document.createElement('span');
+                const toneClass = item.tone_class || (item.delta > 0 ? 'plus' : (item.delta < 0 ? 'minus' : 'zero'));
+                chip.className = `wellness-feedback-chip ${toneClass}`;
+                chip.textContent = `${item.label} ${item.signed || '+0'}`;
+                metricsEl.appendChild(chip);
+            });
+        }
+
+        function show(feedback) {
+            if (!overlay || !feedback) return;
+            try {
+                sessionStorage.setItem('wellhabitHydrationPauseUntil', String(Date.now() + 15000));
+            } catch (error) {
+                // ignore storage errors
+            }
+            const tone = feedback.tone || 'steady';
+            overlay.dataset.tone = tone;
+            eyebrowEl.textContent = tone === 'positive' ? 'AI Encouragement' : (tone === 'negative' ? 'AI Suggestion' : 'AI Wellness Update');
+            titleEl.textContent = feedback.title || 'Scores updated';
+            messageEl.textContent = feedback.message || 'Your wellness scores were refreshed.';
+            renderMetrics(feedback.metrics || []);
+            overlay.hidden = false;
+        }
+
+        okBtn?.addEventListener('click', hide);
+        overlay?.addEventListener('click', (event) => {
+            if (event.target === overlay) hide();
+        });
+
+        const initialFeedback = {{ pending_wellness_feedback|tojson if pending_wellness_feedback else 'null' }};
+        if (initialFeedback) {
+            show(initialFeedback);
+        }
+
+        return show;
+    })();
+
+    (function () {
+        const widget = document.getElementById('global-timer-widget');
+        const widgetMode = document.getElementById('global-timer-mode');
+        const widgetTime = document.getElementById('global-timer-time');
+        const widgetActivity = document.getElementById('global-timer-activity');
+        const widgetStatus = document.getElementById('global-timer-status');
+        const STORAGE_KEY = 'wellhabitPomodoroState';
+        const LOCK_PREFIX = 'wellhabitPomodoroSaved:';
+        const SAVE_URL = {{ url_for('save_pomodoro')|tojson }};
+        const listeners = [];
+
+        function defaultState() {
+            return {
+                focusMinutes: 25,
+                breakMinutes: 5,
+                activityLabel: 'work',
+                mode: 'focus',
+                cycleNumber: 1,
+                remainingSeconds: 25 * 60,
+                isRunning: false,
+                endAtMs: null,
+                sessionKey: null,
+                lastMessage: 'When a focus round ends, it will be saved automatically.'
+            };
+        }
+
+        function readState() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (!raw) return defaultState();
+                const parsed = JSON.parse(raw);
+                return normalizeState(parsed);
+            } catch (error) {
+                return defaultState();
+            }
+        }
+
+        function normalizeState(source) {
+            const base = defaultState();
+            const merged = Object.assign({}, base, source || {});
+            merged.focusMinutes = Math.max(1, Number(merged.focusMinutes) || 25);
+            merged.breakMinutes = Math.max(1, Number(merged.breakMinutes) || 5);
+            merged.cycleNumber = Math.max(1, Number(merged.cycleNumber) || 1);
+            merged.activityLabel = (merged.activityLabel || 'work').toString().trim() || 'work';
+            merged.mode = merged.mode === 'break' ? 'break' : 'focus';
+            merged.remainingSeconds = Math.max(0, Math.round(Number(merged.remainingSeconds) || 0));
+            merged.isRunning = Boolean(merged.isRunning && merged.endAtMs);
+            merged.endAtMs = merged.isRunning ? Number(merged.endAtMs) : null;
+            merged.sessionKey = merged.sessionKey || null;
+            merged.lastMessage = (merged.lastMessage || base.lastMessage).toString();
+            if (!merged.isRunning && merged.remainingSeconds <= 0) {
+                merged.remainingSeconds = (merged.mode === 'focus' ? merged.focusMinutes : merged.breakMinutes) * 60;
+            }
+            return merged;
+        }
+
+        function writeState(nextState) {
+            const normalized = normalizeState(nextState);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+            renderWidget(normalized);
+            listeners.forEach((listener) => listener(normalized));
+            return normalized;
+        }
+
+        function getRemainingSeconds(state) {
+            if (state.isRunning && state.endAtMs) {
+                return Math.max(0, Math.ceil((state.endAtMs - Date.now()) / 1000));
+            }
+            return Math.max(0, Number(state.remainingSeconds) || 0);
+        }
+
+        function formatSeconds(totalSeconds) {
+            const safe = Math.max(0, Math.round(totalSeconds || 0));
+            const minutes = String(Math.floor(safe / 60)).padStart(2, '0');
+            const seconds = String(safe % 60).padStart(2, '0');
+            return `${minutes}:${seconds}`;
+        }
+
+        function shouldShowWidget(state) {
+            const baseline = state.focusMinutes * 60;
+            return state.isRunning || state.mode !== 'focus' || state.cycleNumber !== 1 || getRemainingSeconds(state) !== baseline;
+        }
+
+        function renderWidget(state) {
+            if (!widget) return;
+            const remaining = getRemainingSeconds(state);
+            widget.hidden = !shouldShowWidget(state);
+            widget.classList.toggle('is-running', state.isRunning);
+            widgetMode.textContent = state.mode === 'focus' ? `Focus · Cycle ${state.cycleNumber}` : `Break · Cycle ${state.cycleNumber}`;
+            widgetTime.textContent = formatSeconds(remaining);
+            widgetActivity.textContent = state.activityLabel || 'work';
+            widgetStatus.textContent = state.isRunning ? 'Running' : 'Paused';
+        }
+
+        async function saveFocusSession(state) {
+            if (!state.sessionKey) return;
+            const lockKey = LOCK_PREFIX + state.sessionKey;
+            if (localStorage.getItem(lockKey)) return;
+            localStorage.setItem(lockKey, '1');
+            try {
+                const response = await fetch(SAVE_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        focus_minutes: state.focusMinutes,
+                        break_minutes: state.breakMinutes,
+                        cycle_number: state.cycleNumber,
+                        activity_label: state.activityLabel || 'work'
+                    })
+                });
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error('Save failed');
+                }
+                if (body.wellness_feedback && window.WellHabitShowWellnessFeedback) {
+                    window.WellHabitShowWellnessFeedback(body.wellness_feedback);
+                }
+            } catch (error) {
+                localStorage.removeItem(lockKey);
+                const latest = readState();
+                latest.lastMessage = 'Focus round finished, but saving failed.';
+                writeState(latest);
+            }
+        }
+
+        function advanceIfNeeded() {
+            const state = readState();
+            if (!state.isRunning || !state.endAtMs) {
+                renderWidget(state);
+                return state;
+            }
+            if (Date.now() < state.endAtMs) {
+                renderWidget(state);
+                listeners.forEach((listener) => listener(state));
+                return state;
+            }
+
+            state.remainingSeconds = 0;
+            state.isRunning = false;
+            state.endAtMs = null;
+
+            if (state.mode === 'focus') {
+                const finishedFocusState = Object.assign({}, state);
+                saveFocusSession(finishedFocusState);
+                state.mode = 'break';
+                state.remainingSeconds = state.breakMinutes * 60;
+                state.lastMessage = 'Focus round done. Time for a break.';
+            } else {
+                state.mode = 'focus';
+                state.cycleNumber += 1;
+                state.remainingSeconds = state.focusMinutes * 60;
+                state.sessionKey = null;
+                state.lastMessage = 'Break ended. Start next focus round when ready.';
+            }
+            return writeState(state);
+        }
+
+        function syncRunningClock() {
+            const state = advanceIfNeeded();
+            if (!state.isRunning) return;
+            listeners.forEach((listener) => listener(readState()));
+        }
+
+        window.WellHabitTimer = {
+            getState() {
+                return normalizeState(readState());
+            },
+            subscribe(listener) {
+                if (typeof listener !== 'function') return () => {};
+                listeners.push(listener);
+                listener(this.getState());
+                return () => {
+                    const index = listeners.indexOf(listener);
+                    if (index >= 0) listeners.splice(index, 1);
+                };
+            },
+            configure(config) {
+                const state = readState();
+                if (config.focusMinutes) state.focusMinutes = Math.max(1, Number(config.focusMinutes) || 25);
+                if (config.breakMinutes) state.breakMinutes = Math.max(1, Number(config.breakMinutes) || 5);
+                if (config.activityLabel !== undefined) state.activityLabel = (config.activityLabel || 'work').toString().trim() || 'work';
+                return writeState(state);
+            },
+            start(config) {
+                const state = readState();
+                if (config) {
+                    if (config.focusMinutes) state.focusMinutes = Math.max(1, Number(config.focusMinutes) || 25);
+                    if (config.breakMinutes) state.breakMinutes = Math.max(1, Number(config.breakMinutes) || 5);
+                    if (config.activityLabel !== undefined) state.activityLabel = (config.activityLabel || 'work').toString().trim() || 'work';
+                }
+                if (state.isRunning) return writeState(state);
+                const currentSeconds = getRemainingSeconds(state);
+                state.remainingSeconds = currentSeconds > 0 ? currentSeconds : (state.mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
+                if (state.mode === 'focus' && !state.sessionKey) {
+                    state.sessionKey = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+                }
+                state.isRunning = true;
+                state.endAtMs = Date.now() + state.remainingSeconds * 1000;
+                state.lastMessage = 'Timer is running.';
+                return writeState(state);
+            },
+            pause() {
+                const state = readState();
+                if (!state.isRunning) return writeState(state);
+                state.remainingSeconds = getRemainingSeconds(state);
+                state.isRunning = false;
+                state.endAtMs = null;
+                state.lastMessage = 'Timer paused.';
+                return writeState(state);
+            },
+            reset(config) {
+                const state = readState();
+                if (config) {
+                    if (config.focusMinutes) state.focusMinutes = Math.max(1, Number(config.focusMinutes) || 25);
+                    if (config.breakMinutes) state.breakMinutes = Math.max(1, Number(config.breakMinutes) || 5);
+                    if (config.activityLabel !== undefined) state.activityLabel = (config.activityLabel || 'work').toString().trim() || 'work';
+                }
+                state.mode = 'focus';
+                state.cycleNumber = 1;
+                state.remainingSeconds = state.focusMinutes * 60;
+                state.isRunning = false;
+                state.endAtMs = null;
+                state.sessionKey = null;
+                state.lastMessage = 'When a focus round ends, it will be saved automatically.';
+                return writeState(state);
+            },
+            refresh() {
+                return advanceIfNeeded();
+            },
+            formatSeconds,
+            getRemainingSeconds,
+        };
+
+        window.addEventListener('storage', (event) => {
+            if (event.key !== STORAGE_KEY) return;
+            renderWidget(readState());
+            listeners.forEach((listener) => listener(readState()));
+        });
+
+
+    renderWidget(readState());
+    setInterval(syncRunningClock, 1000);
+})();
+
+(function () {
+    const overlay = document.getElementById('sleep-reminder-overlay');
+    const messageEl = document.getElementById('sleep-reminder-message');
+    const okBtn = document.getElementById('sleep-reminder-ok-btn');
+    const statusUrl = (window.WELLHABIT_PROMPTS && window.WELLHABIT_PROMPTS.sleepStatusUrl) || {{ url_for('sleep_status')|tojson }};
+    const ACK_PREFIX = 'wellhabitSleepReminderAck:';
+    let pendingReminder = null;
+
+    if (!overlay || !messageEl || !okBtn) return;
+
+    function isAcked(dateKey) {
+        return Boolean(dateKey && localStorage.getItem(`${ACK_PREFIX}${dateKey}`) === '1');
+    }
+
+    function markAcked(dateKey) {
+        if (dateKey) localStorage.setItem(`${ACK_PREFIX}${dateKey}`, '1');
+    }
+
+    function timerStillRunning() {
+        const timer = window.WellHabitTimer?.getState?.();
+        return Boolean(timer && timer.isRunning);
+    }
+
+    function openReminder(reminder) {
+        if (!reminder || isAcked(reminder.date_key)) return;
+        pendingReminder = reminder;
+        if (timerStillRunning()) return;
+        messageEl.textContent = reminder.message || 'It is time to sleep.';
+        overlay.hidden = false;
+    }
+
+    function closeReminder() {
+        overlay.hidden = true;
+    }
+
+    async function refreshSleepReminder() {
+        try {
+            const response = await fetch(statusUrl, { headers: { 'Accept': 'application/json' } });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) return;
+            const reminder = body.due_sleep_reminder;
+            if (!reminder) {
+                pendingReminder = null;
+                closeReminder();
+                return;
+            }
+            if (isAcked(reminder.date_key)) {
+                closeReminder();
+                return;
+            }
+            openReminder(reminder);
+        } catch (error) {
+            // ignore refresh issues
+        }
+    }
+
+    okBtn.addEventListener('click', () => {
+        if (pendingReminder?.date_key) {
+            markAcked(pendingReminder.date_key);
+        }
+        closeReminder();
+    });
+
+    window.WellHabitTimer?.subscribe?.((state) => {
+        if (pendingReminder && !state.isRunning) {
+            openReminder(pendingReminder);
+        }
+    });
+
+    refreshSleepReminder();
+    setInterval(refreshSleepReminder, 60000);
+    window.addEventListener('focus', refreshSleepReminder);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refreshSleepReminder();
+    });
+})();
+{% endif %}
+</script>
+
+    {% if current_user.is_authenticated %}
+    <script>
+    window.WELLHABIT_PROMPTS = Object.assign({
+        statusUrl: {{ url_for('hydration_status')|tojson }},
+        sleepStatusUrl: {{ url_for('sleep_status')|tojson }}
+    }, window.WELLHABIT_PROMPTS || {});
     </script>
+    <script src="{{ url_for('static', filename='hydration.js') }}"></script>
+    {% endif %}
 
     {% block scripts %}{% endblock %}
 </body>

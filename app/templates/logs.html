@@ -6,44 +6,76 @@
         <div class="section-title-row">
             <div>
                 <h1>Update Daily Log</h1>
-                <p class="muted">Track your day, write a journal, and note what you just did. Water can be typed as 300 ml, a glass, or a bottle.</p>
+                <p class="muted">Choose only the parts you want to update for this day.</p>
             </div>
-            <span class="muted">One main record per day</span>
+            <span class="muted">Editing {{ selected_date }}</span>
         </div>
-        <form method="post" class="form-grid two-columns">
-            <label>Date
-                <input type="date" name="log_date" value="{{ selected_date.isoformat() }}" required>
+
+        <div class="field-picker-box">
+            <p class="eyebrow">Choose fields to update</p>
+            <div class="field-chip-row" id="field-picker-row">
+                <button class="field-chip" type="button" data-target="field-water">Water Amount</button>
+                <button class="field-chip" type="button" data-target="field-sleep">Sleep Hours</button>
+                <button class="field-chip" type="button" data-target="field-steps">Steps</button>
+                <button class="field-chip" type="button" data-target="field-exercise">Exercise</button>
+                <button class="field-chip" type="button" data-target="field-journal">Daily Summary / Journal</button>
+                <button class="field-chip secondary-chip" type="button" id="show-all-fields">Show All</button>
+                <button class="field-chip secondary-chip" type="button" id="clear-all-fields">Clear</button>
+            </div>
+        </div>
+
+        <form method="post" class="form-grid two-columns optional-log-form" id="daily-log-form">
+            <input type="hidden" name="log_date" value="{{ selected_date.isoformat() }}">
+
+            <label class="selectable-field is-hidden" id="field-water">Water Amount
+                <input type="text" name="water_ml" placeholder="300 ml / a glass / a bottle">
+                <small class="muted">This adds more water to the selected day.</small>
             </label>
-            <label>Water Amount
-                <input type="text" name="water_ml" value="{{ current_log.water_ml if current_log else 0 }}" placeholder="300 ml / a glass / a bottle" required>
+
+            <div class="selectable-field is-hidden sleep-field-group" id="field-sleep">
+                <label>Sleep category
+                    <select name="sleep_input_mode" id="sleep-input-mode">
+                        <option value="hours">Fill duration directly</option>
+                        <option value="range">Fill sleep time range</option>
+                    </select>
+                </label>
+                <label class="sleep-hours-block">Sleep Hours
+                    <input type="number" name="sleep_hours" min="0" step="0.5" placeholder="7.5">
+                </label>
+                <div class="sleep-range-grid is-hidden" id="sleep-range-grid">
+                    <label>Sleep from
+                        <input type="time" name="sleep_start_time">
+                    </label>
+                    <label>Sleep to
+                        <input type="time" name="sleep_end_time">
+                    </label>
+                </div>
+            </div>
+
+            <label class="selectable-field is-hidden" id="field-steps">Steps
+                <input type="number" name="steps" min="0" placeholder="8500">
             </label>
-            <label>Sleep Hours
-                <input type="number" name="sleep_hours" min="0" step="0.5" value="{{ current_log.sleep_hours if current_log else 0 }}" required>
+
+            <div class="selectable-field is-hidden exercise-field-group" id="field-exercise">
+                <label>Exercise
+                    <input type="text" name="exercise_name" placeholder="Example: push-ups, running, yoga">
+                </label>
+                <div class="exercise-dual-grid">
+                    <label>Minutes
+                        <input type="number" name="exercise_minutes" min="0" placeholder="30">
+                    </label>
+                    <label>Reps
+                        <input type="number" name="exercise_reps" min="0" placeholder="20">
+                    </label>
+                </div>
+                <p class="muted small">For exercise, write what you did. Reps or minutes must be filled.</p>
+            </div>
+
+            <label class="full-width selectable-field is-hidden" id="field-journal">Daily Summary / Journal
+                <textarea name="journal_text" rows="5" placeholder="Write your journal only if you want to update it"></textarea>
             </label>
-            <label>Sleep Quality
-                <select name="sleep_quality">
-                    {% set quality = current_log.sleep_quality if current_log else 'Average' %}
-                    {% for option in ['Poor', 'Average', 'Good', 'Excellent'] %}
-                        <option value="{{ option }}" {% if option == quality %}selected{% endif %}>{{ option }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>Steps
-                <input type="number" name="steps" min="0" value="{{ current_log.steps if current_log else 0 }}" required>
-            </label>
-            <label>Exercise (minutes)
-                <input type="number" name="exercise_minutes" min="0" value="{{ current_log.exercise_minutes if current_log else 0 }}" required>
-            </label>
-            <label class="full-width">Daily Summary / Journal
-                <textarea name="journal_text" rows="5" placeholder="Write a short diary or summary of your day">{{ current_log.journal_text if current_log else '' }}</textarea>
-            </label>
-            <label class="full-width">What did you just do?
-                <textarea name="activity_text" rows="3" placeholder="Example: I just ate lunch and then sat down to study.">{{ current_log.activity_text if current_log else '' }}</textarea>
-            </label>
-            <label class="full-width">Extra Notes
-                <textarea name="notes" rows="3" placeholder="Optional notes">{{ current_log.notes if current_log else '' }}</textarea>
-            </label>
-            <button class="btn primary full-width" type="submit">Save Daily Record</button>
+
+            <button class="btn primary full-width" type="submit">Update Daily Log</button>
         </form>
     </article>
 
@@ -51,6 +83,14 @@
         <div class="section-title-row">
             <h2>History</h2>
             <span class="muted">Latest first</span>
+        </div>
+
+        <div class="profile-note-box">
+            <p class="eyebrow">Current Snapshot</p>
+            <p>{{ current_snapshot.water_ml }} ml water · {{ current_snapshot.sleep_hours }} h sleep · {{ current_snapshot.steps }} steps · {{ current_snapshot.exercise_minutes }} min exercise</p>
+            {% if current_snapshot.journal_text %}
+                <p class="muted">Journal saved for this day.</p>
+            {% endif %}
         </div>
 
         {% if current_log and current_log.ai_feedback %}
@@ -71,7 +111,8 @@
             {% for log in all_logs %}
                 <a class="history-item" href="{{ url_for('logs', date=log.log_date.isoformat()) }}">
                     <strong>{{ log.log_date }}</strong>
-                    <span>{{ log.water_ml }} ml · {{ log.sleep_hours }} h · {{ log.steps }} steps</span>
+                    <span>{{ log.water_ml }} ml · {{ log.sleep_hours }} h · {{ log.steps }} steps · {{ log.exercise_minutes }} min</span>
+                    {% if log.journal_text %}<p>Journal saved</p>{% endif %}
                 </a>
             {% else %}
                 <p class="muted">No records yet.</p>
@@ -80,7 +121,6 @@
     </article>
 </section>
 
-{% include '_hydration_modal.html' %}
 {% endblock %}
 
 {% block scripts %}
@@ -88,8 +128,57 @@
 window.WELLHABIT_PROMPTS = {
     due: {{ due_hydration_prompt|tojson }},
     upcoming: {{ upcoming_hydration_prompt|tojson }},
-    morningPromptExists: {{ morning_prompt_exists|tojson }}
+    morningPromptExists: {{ morning_prompt_exists|tojson }},
+    statusUrl: {{ url_for('hydration_status')|tojson }},
+    sleepStatusUrl: {{ url_for('sleep_status')|tojson }}
 };
+
+(function () {
+    const chips = Array.from(document.querySelectorAll('.field-chip[data-target]'));
+    const fields = Array.from(document.querySelectorAll('.selectable-field'));
+    const showAllBtn = document.getElementById('show-all-fields');
+    const clearAllBtn = document.getElementById('clear-all-fields');
+
+    function getField(targetId) {
+        return document.getElementById(targetId);
+    }
+
+    function toggleField(targetId, forceVisible) {
+        const field = getField(targetId);
+        if (!field) return;
+        const shouldShow = typeof forceVisible === 'boolean' ? forceVisible : field.classList.contains('is-hidden');
+        field.classList.toggle('is-hidden', !shouldShow);
+        const chip = chips.find((item) => item.dataset.target === targetId);
+        if (chip) {
+            chip.classList.toggle('is-active', shouldShow);
+        }
+    }
+
+    chips.forEach((chip) => {
+        chip.addEventListener('click', () => toggleField(chip.dataset.target));
+    });
+
+    showAllBtn?.addEventListener('click', () => {
+        fields.forEach((field) => toggleField(field.id, true));
+    });
+
+    clearAllBtn?.addEventListener('click', () => {
+        fields.forEach((field) => toggleField(field.id, false));
+    });
+
+    const sleepModeSelect = document.getElementById('sleep-input-mode');
+    const sleepRangeGrid = document.getElementById('sleep-range-grid');
+    const sleepHoursBlock = document.querySelector('.sleep-hours-block');
+
+    function refreshSleepMode() {
+        if (!sleepModeSelect || !sleepRangeGrid || !sleepHoursBlock) return;
+        const useRange = sleepModeSelect.value === 'range';
+        sleepRangeGrid.classList.toggle('is-hidden', !useRange);
+        sleepHoursBlock.classList.toggle('is-hidden', useRange);
+    }
+
+    sleepModeSelect?.addEventListener('change', refreshSleepMode);
+    refreshSleepMode();
+})();
 </script>
-<script src="{{ url_for('static', filename='hydration.js') }}"></script>
 {% endblock %}

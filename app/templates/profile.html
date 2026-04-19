@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% block title %}Profile | WellHabit{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div>
+        <h1>{{ current_user.username }}'s Profile</h1>
+        <p class="muted">Your scores, streaks, goals, and daily stats live here.</p>
+    </div>
+</section>
+
+{% if profile_locked %}
+<section class="profile-sticky-layout">
+    <aside class="floating-panel profile-goals-panel">
+        <div class="section-title-row compact-head">
+            <div>
+                <p class="eyebrow">AI Goals</p>
+                <h2>Daily Targets</h2>
+            </div>
+        </div>
+        <p class="muted small profile-panel-time">Sleep by {{ current_user.optimal_bedtime or '22:00' }} · Wake at {{ current_user.optimal_wake_time or '07:00' }}</p>
+
+        <div class="profile-note-box progress-box-tight">
+            <p class="eyebrow">Goal Progress</p>
+            <div class="wellness-bars compact-progress-stack">
+                {% for item in progress_cards %}
+                    <article class="wellness-row compact-progress-row">
+                        <div class="wellness-row-head compact-progress-head">
+                            <strong>{{ item.label }}</strong>
+                            <span>{{ item.value }}</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" style="width: {{ item.percent }}%;"></div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        </div>
+    </aside>
+
+    <div class="profile-main-stack">
+        <section class="card profile-summary-card">
+            <div class="section-title-row">
+                <div>
+                    <p class="eyebrow">Quick Stats</p>
+                    <h2>Today</h2>
+                </div>
+            </div>
+            <div class="goal-card-grid four-up-grid">
+                {% for stat in quick_stats_cards %}
+                    <article class="mini-stat-card compact-stat-card">
+                        <span class="stat-label">{{ stat.label }}</span>
+                        <strong>{{ stat.value }}</strong>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="card profile-summary-card">
+            <div class="section-title-row">
+                <div>
+                    <p class="eyebrow">Current Streaks</p>
+                    <h2>Goal Streaks</h2>
+                </div>
+            </div>
+            <div class="goal-card-grid streak-card-grid">
+                {% for streak in streak_cards %}
+                    <article class="mini-stat-card compact-stat-card streak-card">
+                        <span class="stat-label">{{ streak.label }}</span>
+                        <strong>{{ streak.value }} day{% if streak.value != 1 %}s{% endif %}</strong>
+                        <small class="muted">{{ streak.subtitle }}</small>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="card profile-summary-card">
+            <div class="section-title-row">
+                <div>
+                    <p class="eyebrow">Live Scores</p>
+                    <h2>Wellness Overview</h2>
+                </div>
+            </div>
+
+            <div class="wellness-bars">
+                {% for metric in wellness_metrics %}
+                    <article class="wellness-row">
+                        <div class="wellness-row-head">
+                            <div>
+                                <strong>{{ metric.label }}</strong>
+                                <span>{{ metric.subtitle }}</span>
+                            </div>
+                            <div class="wellness-score-value">{{ metric.value }}/100</div>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" style="width: {{ metric.value }}%;"></div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+
+            {% if current_user.wellness_summary %}
+                <div class="profile-note-box">
+                    <p class="eyebrow">AI Wellness Note</p>
+                    <p>{{ current_user.wellness_summary }}</p>
+                </div>
+            {% endif %}
+
+            {% if latest_log %}
+                <div class="profile-note-box">
+                    <p class="eyebrow">Latest Log Snapshot</p>
+                    <p>{{ latest_log.log_date }} · {{ latest_log.water_ml }} ml water · {{ latest_log.sleep_hours }} h sleep · {{ latest_log.steps }} steps · {{ latest_log.exercise_minutes }} min exercise</p>
+                </div>
+            {% endif %}
+        </section>
+    </div>
+</section>
+{% else %}
+<section class="split-grid profile-layout">
+    <article class="card profile-form-card">
+        <div class="section-title-row">
+            <div>
+                <p class="eyebrow">Personal Data</p>
+                <h2>Basic Information</h2>
+            </div>
+        </div>
+        <form method="post" class="form-grid two-columns">
+            <label>Age
+                <input type="number" name="age" min="1" value="{{ current_user.age or '' }}" placeholder="17">
+            </label>
+            <label>Weight (kg)
+                <input type="number" name="weight_kg" min="1" step="0.1" value="{{ current_user.weight_kg or '' }}" placeholder="60">
+            </label>
+            <label>Gender
+                <select name="gender_identity">
+                    <option value="female" {% if current_user.gender_identity == 'female' %}selected{% endif %}>Female</option>
+                    <option value="male" {% if current_user.gender_identity == 'male' %}selected{% endif %}>Male</option>
+                    <option value="non_binary" {% if current_user.gender_identity == 'non_binary' %}selected{% endif %}>Non-binary</option>
+                    <option value="prefer_not_say" {% if current_user.gender_identity in [None, '', 'prefer_not_say'] %}selected{% endif %}>Prefer not to say</option>
+                </select>
+            </label>
+            <label>Height (cm)
+                <input type="number" name="height_cm" min="1" step="0.1" value="{{ current_user.height_cm or '' }}" placeholder="170">
+            </label>
+            <div class="full-width goal-note-box">
+                <p class="eyebrow">AI Goal Setting</p>
+                <p class="muted">You enter age, weight, height, and optional gender. WellHabit then sets Daily Water Goal (ml), Sleep Goal (hours), Step Goal, and a recommended bedtime / wake-up time automatically.</p>
+            </div>
+            <button class="btn primary full-width" type="submit">Save Once and Generate Goals</button>
+        </form>
+    </article>
+</section>
+{% endif %}
+{% endblock %}
