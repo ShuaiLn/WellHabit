@@ -16,8 +16,7 @@
             <div class="field-chip-row" id="field-picker-row">
                 <button class="field-chip" type="button" data-target="field-water">Water Amount</button>
                 <button class="field-chip" type="button" data-target="field-sleep">Sleep Hours</button>
-                <button class="field-chip" type="button" data-target="field-steps">Steps</button>
-                <button class="field-chip" type="button" data-target="field-exercise">Exercise</button>
+                <button class="field-chip" type="button" data-target="field-exercise">Exercise + Steps</button>
                 <button class="field-chip" type="button" data-target="field-journal">Daily Summary / Journal</button>
                 <button class="field-chip secondary-chip" type="button" id="show-all-fields">Show All</button>
                 <button class="field-chip secondary-chip" type="button" id="clear-all-fields">Clear</button>
@@ -25,7 +24,12 @@
         </div>
 
         <form method="post" class="form-grid two-columns optional-log-form" id="daily-log-form">
-            <input type="hidden" name="log_date" value="{{ selected_date.isoformat() }}">
+            <div class="full-width">
+                <label>Log Date
+                    <input type="date" name="log_date" value="{{ selected_date.isoformat() }}" required>
+                </label>
+                <p class="muted small">Default is today. Change it only if you want to update another day.</p>
+            </div>
 
             <label class="selectable-field is-hidden" id="field-water">Water Amount
                 <input type="text" name="water_ml" placeholder="300 ml / a glass / a bottle">
@@ -52,28 +56,59 @@
                 </div>
             </div>
 
-            <label class="selectable-field is-hidden" id="field-steps">Steps
-                <input type="number" name="steps" min="0" placeholder="8500">
-            </label>
+            
 
-            <div class="selectable-field is-hidden exercise-field-group" id="field-exercise">
-                <label>Exercise
-                    <input type="text" name="exercise_name" placeholder="Example: push-ups, running, yoga">
-                </label>
-                <div class="exercise-dual-grid">
-                    <label>Minutes
-                        <input type="number" name="exercise_minutes" min="0" placeholder="30">
-                    </label>
-                    <label>Reps
-                        <input type="number" name="exercise_reps" min="0" placeholder="20">
-                    </label>
+            <div class="selectable-field is-hidden exercise-field-group full-width" id="field-exercise">
+                <div class="exercise-field-split">
+                    <div class="exercise-subcard">
+                        <label>Exercise
+                            <input type="text" name="exercise_name" placeholder="Example: push-ups, running, yoga">
+                        </label>
+                        <div class="exercise-dual-grid">
+                            <label>Minutes
+                                <input type="number" name="exercise_minutes" min="0" placeholder="30">
+                            </label>
+                            <label>Reps
+                                <input type="number" name="exercise_reps" min="0" placeholder="20">
+                            </label>
+                        </div>
+                        <p class="muted small">For exercise, write what you did. Reps or minutes must be filled.</p>
+                    </div>
+                    <div class="exercise-subcard steps-subcard">
+                        <label>Steps
+                            <input type="number" name="steps" min="0" placeholder="8500">
+                        </label>
+                        <p class="muted small">You can fill only Steps, only Exercise, or both.</p>
+                    </div>
                 </div>
-                <p class="muted small">For exercise, write what you did. Reps or minutes must be filled.</p>
+                <p class="muted small exercise-section-note">Exercise and Steps can be updated separately or together.</p>
             </div>
 
-            <label class="full-width selectable-field is-hidden" id="field-journal">Daily Summary / Journal
-                <textarea name="journal_text" rows="5" placeholder="Write your journal only if you want to update it"></textarea>
-            </label>
+            <div class="full-width selectable-field is-hidden journal-field-group" id="field-journal">
+                <label>Daily Summary / Journal
+                    <textarea name="journal_text" rows="5" placeholder="Write your journal only if you want to update it"></textarea>
+                </label>
+                <div class="journal-mood-grid emoji-mood-layout single-column-mood-grid">
+                    <div class="emoji-mood-picker-wrap">
+                        <span class="field-label">How do you feel?</span>
+                        <input type="hidden" name="journal_mood_emoji" id="journal-mood-emoji" value="{{ selected_mood_emoji }}">
+                        <div class="emoji-mood-picker" id="emoji-mood-picker">
+                            {% for item in mood_emoji_choices %}
+                                <button
+                                    type="button"
+                                    class="emoji-mood-btn {% if selected_mood_emoji == item.emoji %}is-active{% endif %}"
+                                    data-emoji="{{ item.emoji }}"
+                                    data-label="{{ item.title }}"
+                                    aria-pressed="{{ 'true' if selected_mood_emoji == item.emoji else 'false' }}"
+                                    title="{{ item.title }}"
+                                >{{ item.emoji }}</button>
+                            {% endfor %}
+                        </div>
+                        <p class="muted small emoji-hint" id="emoji-mood-hint">{% if current_log and current_log.mood_label %}Current mood: {{ (current_log.mood_label or '').replace('_', ' ').title() }}{% else %}Pick one emoji. AI will read the feeling behind it and save it to your mood records.{% endif %}</p>
+                    </div>
+                </div>
+                <p class="muted small">Your selected emoji helps AI update your emotion records and the mood trend on your profile page.</p>
+            </div>
 
             <button class="btn primary full-width" type="submit">Update Daily Log</button>
         </form>
@@ -88,6 +123,9 @@
         <div class="profile-note-box">
             <p class="eyebrow">Current Snapshot</p>
             <p>{{ current_snapshot.water_ml }} ml water · {{ current_snapshot.sleep_hours }} h sleep · {{ current_snapshot.steps }} steps · {{ current_snapshot.exercise_minutes }} min exercise</p>
+            {% if current_log and (current_log.mood_label or current_log.mood_custom_text) %}
+                <p class="muted">Mood: {{ current_log.mood_custom_text if current_log.mood_label == 'custom' and current_log.mood_custom_text else (current_log.mood_label or '').replace('_', ' ').title() }}</p>
+            {% endif %}
             {% if current_snapshot.journal_text %}
                 <p class="muted">Journal saved for this day.</p>
             {% endif %}
@@ -112,6 +150,7 @@
                 <a class="history-item" href="{{ url_for('logs', date=log.log_date.isoformat()) }}">
                     <strong>{{ log.log_date }}</strong>
                     <span>{{ log.water_ml }} ml · {{ log.sleep_hours }} h · {{ log.steps }} steps · {{ log.exercise_minutes }} min</span>
+                    {% if log.mood_label or log.mood_custom_text %}<p>Mood: {{ log.mood_custom_text if log.mood_label == 'custom' and log.mood_custom_text else (log.mood_label or '').replace('_', ' ').title() }}</p>{% endif %}
                     {% if log.journal_text %}<p>Journal saved</p>{% endif %}
                 </a>
             {% else %}
@@ -125,13 +164,18 @@
 
 {% block scripts %}
 <script>
-window.WELLHABIT_PROMPTS = {
+window.WELLHABIT_PROMPTS = Object.assign(window.WELLHABIT_PROMPTS || {}, {
     due: {{ due_hydration_prompt|tojson }},
     upcoming: {{ upcoming_hydration_prompt|tojson }},
+    morningPrompt: {{ morning_hydration_prompt|tojson }},
     morningPromptExists: {{ morning_prompt_exists|tojson }},
     statusUrl: {{ url_for('hydration_status')|tojson }},
     sleepStatusUrl: {{ url_for('sleep_status')|tojson }}
-};
+});
+
+if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && window.WELLHABIT_PROMPTS.due.id) {
+    window.WellHabitHydrationOpenPrompt(window.WELLHABIT_PROMPTS.due);
+}
 
 (function () {
     const chips = Array.from(document.querySelectorAll('.field-chip[data-target]'));
@@ -168,6 +212,9 @@ window.WELLHABIT_PROMPTS = {
 
     const sleepModeSelect = document.getElementById('sleep-input-mode');
     const sleepRangeGrid = document.getElementById('sleep-range-grid');
+    const journalMoodHidden = document.getElementById('journal-mood-emoji');
+    const emojiMoodButtons = Array.from(document.querySelectorAll('.emoji-mood-btn'));
+    const emojiMoodHint = document.getElementById('emoji-mood-hint');
     const sleepHoursBlock = document.querySelector('.sleep-hours-block');
 
     function refreshSleepMode() {
@@ -177,8 +224,34 @@ window.WELLHABIT_PROMPTS = {
         sleepHoursBlock.classList.toggle('is-hidden', useRange);
     }
 
+    function refreshJournalMood() {
+        if (!journalMoodHidden || !emojiMoodButtons.length) return;
+        const selected = journalMoodHidden.value;
+        let selectedLabel = '';
+        emojiMoodButtons.forEach((button) => {
+            const active = button.dataset.emoji === selected;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            if (active) selectedLabel = button.dataset.label || '';
+        });
+        if (emojiMoodHint) {
+            emojiMoodHint.textContent = selectedLabel
+                ? `Selected emoji: ${selected} ${selectedLabel}. AI will analyze it when you save.`
+                : 'Pick one emoji. AI will read the feeling behind it and save it to your mood records.';
+        }
+    }
+
+    emojiMoodButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+            if (!journalMoodHidden) return;
+            journalMoodHidden.value = journalMoodHidden.value === button.dataset.emoji ? '' : button.dataset.emoji;
+            refreshJournalMood();
+        });
+    });
+
     sleepModeSelect?.addEventListener('change', refreshSleepMode);
     refreshSleepMode();
+    refreshJournalMood();
 })();
 </script>
 {% endblock %}

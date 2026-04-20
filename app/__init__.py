@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import sqlite3
 
 from flask import Flask
@@ -26,12 +27,18 @@ def _ensure_column(cursor: sqlite3.Cursor, table_name: str, column_name: str, co
         cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
 
 
+def _ensure_index(cursor: sqlite3.Cursor, index_name: str, sql: str) -> None:
+    cursor.execute(sql)
+
+
 def run_lightweight_migrations(app: Flask) -> None:
     db_path = _get_sqlite_db_path(app)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
+        cursor.execute('PRAGMA foreign_keys=ON')
+        cursor.execute('PRAGMA journal_mode=WAL')
 
         tables = {
             row[0] for row in cursor.execute(
@@ -61,18 +68,23 @@ def run_lightweight_migrations(app: Flask) -> None:
 
         if 'daily_log' in tables:
             _ensure_column(cursor, 'daily_log', 'journal_text', 'journal_text TEXT')
+            _ensure_column(cursor, 'daily_log', 'mood_label', "mood_label VARCHAR(40)")
+            _ensure_column(cursor, 'daily_log', 'mood_custom_text', "mood_custom_text VARCHAR(120)")
             _ensure_column(cursor, 'daily_log', 'activity_text', 'activity_text TEXT')
             _ensure_column(cursor, 'daily_log', 'ai_meal_detected', 'ai_meal_detected BOOLEAN NOT NULL DEFAULT 0')
             _ensure_column(cursor, 'daily_log', 'ai_meal_confidence', "ai_meal_confidence VARCHAR(20)")
             _ensure_column(cursor, 'daily_log', 'ai_feedback', 'ai_feedback TEXT')
             _ensure_column(cursor, 'daily_log', 'last_meal_detected_at', 'last_meal_detected_at DATETIME')
+            _ensure_index(cursor, 'ix_daily_log_user_date', 'CREATE INDEX IF NOT EXISTS ix_daily_log_user_date ON daily_log (user_id, log_date)')
 
         if 'task' in tables:
             _ensure_column(cursor, 'task', 'sort_order', 'sort_order INTEGER NOT NULL DEFAULT 0')
             _ensure_column(cursor, 'task', 'completed_at', 'completed_at DATETIME')
             _ensure_column(cursor, 'task', 'task_type', "task_type VARCHAR(30) NOT NULL DEFAULT 'regular'")
+            _ensure_column(cursor, 'task', 'auto_tracked_water_ml', 'auto_tracked_water_ml INTEGER NOT NULL DEFAULT 0')
             cursor.execute('UPDATE task SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0')
             cursor.execute("UPDATE task SET task_type = 'regular' WHERE task_type IS NULL OR task_type = ''")
+            _ensure_index(cursor, 'ix_task_user_date_sort', 'CREATE INDEX IF NOT EXISTS ix_task_user_date_sort ON task (user_id, task_date, sort_order)')
 
         if 'calendar_event' not in tables:
             cursor.execute(
@@ -113,6 +125,8 @@ def run_lightweight_migrations(app: Flask) -> None:
             )
             cursor.execute('CREATE INDEX IF NOT EXISTS ix_hydration_prompt_user_due ON hydration_prompt (user_id, due_at)')
 
+        if 'hydration_prompt' in tables:
+            _ensure_index(cursor, 'ix_hydration_prompt_user_type_status_due', 'CREATE INDEX IF NOT EXISTS ix_hydration_prompt_user_type_status_due ON hydration_prompt (user_id, prompt_type, response_status, due_at)')
 
         if 'pomodoro_session' in tables:
             _ensure_column(cursor, 'pomodoro_session', 'activity_label', 'activity_label VARCHAR(200)')
@@ -133,6 +147,33 @@ def run_lightweight_migrations(app: Flask) -> None:
             )
             cursor.execute('CREATE INDEX IF NOT EXISTS ix_activity_entry_user_event_at ON activity_entry (user_id, event_at)')
 
+        if 'activity_entry' in tables:
+            _ensure_index(cursor, 'ix_activity_entry_user_type_event_at', 'CREATE INDEX IF NOT EXISTS ix_activity_entry_user_type_event_at ON activity_entry (user_id, entry_type, event_at)')
+
+        if 'mood_entry' not in tables:
+            cursor.execute(
+                '''
+                CREATE TABLE mood_entry (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    log_id INTEGER,
+                    source VARCHAR(30) NOT NULL DEFAULT 'journal',
+                    mood_label VARCHAR(40) NOT NULL,
+                    mood_custom_text VARCHAR(120),
+                    mood_value INTEGER NOT NULL DEFAULT 50,
+                    summary TEXT,
+                    detected_by VARCHAR(20) NOT NULL DEFAULT 'user',
+                    event_at DATETIME NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES user (id),
+                    FOREIGN KEY(log_id) REFERENCES daily_log (id)
+                )
+                '''
+            )
+            cursor.execute('CREATE INDEX IF NOT EXISTS ix_mood_entry_user_event_at ON mood_entry (user_id, event_at)')
+
+        if 'mood_entry' in tables:
+            _ensure_index(cursor, 'ix_mood_entry_user_source_event_at', 'CREATE INDEX IF NOT EXISTS ix_mood_entry_user_source_event_at ON mood_entry (user_id, source, event_at)')
+
         conn.commit()
 
 
@@ -142,9 +183,13 @@ def create_app():
     instance_path.mkdir(parents=True, exist_ok=True)
 
     app.config.update(
-        SECRET_KEY='dev-change-this-secret-key',
-        SQLALCHEMY_DATABASE_URI=f"sqlite:///{instance_path / 'wellhabit.db'}",
+        SECRET_KEY=os.getenv('SECRET_KEY') or os.getenv('FLASK_SECRET_KEY') or 'dev-change-this-secret-key',
+        SQLALCHEMY_DATABASE_URI=os.getenv('DATABASE_URL') or f"sqlite:///{instance_path / 'wellhabit.db'}",
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=(os.getenv('SESSION_COOKIE_SECURE', '0') == '1'),
+        SQLALCHEMY_ENGINE_OPTIONS={'connect_args': {'timeout': 15}},
     )
 
     run_lightweight_migrations(app)

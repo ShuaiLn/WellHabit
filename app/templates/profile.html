@@ -4,7 +4,7 @@
 <section class="page-header">
     <div>
         <h1>{{ current_user.username }}'s Profile</h1>
-        <p class="muted">Your scores, streaks, goals, and daily stats live here.</p>
+        <p class="muted">Your scores, streaks, goals, daily stats, and emotion trends live here.</p>
     </div>
 </section>
 
@@ -23,17 +23,75 @@
             <p class="eyebrow">Goal Progress</p>
             <div class="wellness-bars compact-progress-stack">
                 {% for item in progress_cards %}
-                    <article class="wellness-row compact-progress-row">
+                    <article class="wellness-row compact-progress-row {% if item.glass_progress %}expandable-progress-row{% endif %}">
                         <div class="wellness-row-head compact-progress-head">
                             <strong>{{ item.label }}</strong>
-                            <span>{{ item.value }}</span>
+                            {% if item.glass_progress %}
+                                <button class="progress-inline-toggle" type="button" data-progress-target="water-glass-progress" aria-expanded="false">
+                                    <span>{{ item.value }}</span>
+                                    <small>{{ item.toggle_hint }}</small>
+                                </button>
+                            {% else %}
+                                <span>{{ item.value }}</span>
+                            {% endif %}
                         </div>
                         <div class="progress-track">
                             <div class="progress-fill" style="width: {{ item.percent }}%;"></div>
                         </div>
+                        {% if item.glass_progress %}
+                            <div class="glass-progress-panel" id="water-glass-progress" hidden>
+                                <div class="glass-progress-head">
+                                    <strong>{{ item.glass_progress.current_display }} / {{ item.glass_progress.total_display }}</strong>
+                                    <span>{{ item.glass_progress.remaining_text }}</span>
+                                </div>
+                                <div class="glass-segment-row">
+                                    {% for segment in item.glass_progress.segments %}
+                                        <span class="glass-segment {{ segment.state }}" title="Glass {{ segment.index }}">
+                                            <span class="glass-segment-fill" style="width: {{ segment.fill_percent }}%;"></span>
+                                        </span>
+                                    {% endfor %}
+                                </div>
+                                <p class="muted small">1 glass = 250 ml</p>
+                            </div>
+                        {% endif %}
                     </article>
                 {% endfor %}
             </div>
+        </div>
+
+        <div class="profile-note-box profile-target-overview-box">
+            <div class="section-title-row compact-head">
+                <div>
+                    <p class="eyebrow">AI Goals</p>
+                    <h3>Target Overview</h3>
+                </div>
+            </div>
+            <div class="goal-card-grid sidebar-goal-grid">
+                {% for goal in goal_cards %}
+                    <article class="mini-stat-card compact-stat-card">
+                        <span class="stat-label">{{ goal.label }}</span>
+                        <strong>{{ goal.value }}</strong>
+                        {% if goal.subtitle %}<small class="muted">{{ goal.subtitle }}</small>{% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="profile-note-box goal-editor-box">
+            <div class="section-title-row compact-head">
+                <div>
+                    <p class="eyebrow">Exercise Goal</p>
+                    <h3>Daily Training Intensity</h3>
+                </div>
+            </div>
+            <form method="post" class="goal-editor-form">
+                <input type="hidden" name="action" value="update_exercise_goal">
+                <label>
+                    Exercise goal (minutes)
+                    <input type="number" name="daily_exercise_goal_minutes" min="5" max="300" step="5" value="{{ current_user.daily_exercise_goal_minutes or 30 }}">
+                </label>
+                <button class="btn secondary full-width" type="submit">Update training intensity</button>
+            </form>
         </div>
     </aside>
 
@@ -83,7 +141,7 @@
 
             <div class="wellness-bars">
                 {% for metric in wellness_metrics %}
-                    <article class="wellness-row">
+                    <article class="wellness-row metric-{{ metric.key }}">
                         <div class="wellness-row-head">
                             <div>
                                 <strong>{{ metric.label }}</strong>
@@ -92,7 +150,7 @@
                             <div class="wellness-score-value">{{ metric.value }}/100</div>
                         </div>
                         <div class="progress-track">
-                            <div class="progress-fill" style="width: {{ metric.value }}%;"></div>
+                            <div class="progress-fill metric-{{ metric.key }}" style="width: {{ metric.value }}%;"></div>
                         </div>
                     </article>
                 {% endfor %}
@@ -104,6 +162,44 @@
                     <p>{{ current_user.wellness_summary }}</p>
                 </div>
             {% endif %}
+
+            <div class="profile-note-box mood-trend-card">
+                <div class="section-title-row compact-head">
+                    <div>
+                        <p class="eyebrow">Emotion Trend</p>
+                        <h3>Last {{ mood_trend.points|length }} days</h3>
+                    </div>
+                    {% if mood_trend.latest %}
+                        <span class="pill">Latest: {{ mood_trend.latest.display }}</span>
+                    {% endif %}
+                </div>
+                <div class="mood-chart-wrap">
+                    <svg class="mood-chart" id="mood-chart" viewBox="0 0 700 220" preserveAspectRatio="none" data-points='{{ mood_trend.points|tojson }}'>
+                        <g id="mood-chart-grid"></g>
+                        <path id="mood-chart-line" d="" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
+                        <g id="mood-chart-points"></g>
+                    </svg>
+                </div>
+                <div class="mood-chart-labels">
+                    {% for point in mood_trend.points %}
+                        <span>{{ point.short_date }}</span>
+                    {% endfor %}
+                </div>
+                <div class="mood-recent-list">
+                    {% for entry in mood_trend.recent_entries %}
+                        <div class="mood-recent-item">
+                            <span class="mood-dot" style="background: {{ entry.color }};"></span>
+                            <div>
+                                <strong>{{ entry.display }}</strong>
+                                <p class="muted small">{{ entry.event_at.strftime('%m/%d %H:%M') }} · {{ entry.source }}</p>
+                                {% if entry.summary %}<p class="muted small">{{ entry.summary }}</p>{% endif %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="muted">No mood records yet.</p>
+                    {% endfor %}
+                </div>
+            </div>
 
             {% if latest_log %}
                 <div class="profile-note-box">
@@ -150,4 +246,75 @@
     </article>
 </section>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    document.querySelectorAll('[data-progress-target]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const target = document.getElementById(btn.dataset.progressTarget);
+            if (!target) return;
+            const willOpen = target.hasAttribute('hidden');
+            target.toggleAttribute('hidden', !willOpen);
+            btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    });
+
+    const svg = document.getElementById('mood-chart');
+    const line = document.getElementById('mood-chart-line');
+    const pointsWrap = document.getElementById('mood-chart-points');
+    const gridWrap = document.getElementById('mood-chart-grid');
+    if (!svg || !line || !pointsWrap || !gridWrap) return;
+
+    let points = [];
+    try {
+        points = JSON.parse(svg.dataset.points || '[]');
+    } catch (error) {
+        points = [];
+    }
+    if (!points.length) return;
+
+    const width = 700;
+    const height = 220;
+    const left = 16;
+    const right = width - 16;
+    const top = 16;
+    const bottom = height - 26;
+    const span = Math.max(1, points.length - 1);
+
+    [25, 50, 75, 100].forEach((level) => {
+        const y = bottom - ((level / 100) * (bottom - top));
+        const guide = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        guide.setAttribute('x1', String(left));
+        guide.setAttribute('x2', String(right));
+        guide.setAttribute('y1', String(y));
+        guide.setAttribute('y2', String(y));
+        guide.setAttribute('class', 'mood-chart-guide');
+        gridWrap.appendChild(guide);
+    });
+
+    const d = points.map((point, index) => {
+        const x = left + ((right - left) * (index / span));
+        const y = bottom - ((Number(point.value || 0) / 100) * (bottom - top));
+        point._x = x;
+        point._y = y;
+        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+    line.setAttribute('d', d);
+
+    points.forEach((point) => {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(point._x));
+        circle.setAttribute('cy', String(point._y));
+        circle.setAttribute('r', '4.5');
+        circle.setAttribute('fill', point.color || '#8b5cf6');
+        circle.setAttribute('class', 'mood-chart-point');
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = `${point.short_date}: ${point.display} (${point.value}/100)`;
+        circle.appendChild(title);
+        pointsWrap.appendChild(circle);
+    });
+})();
+</script>
 {% endblock %}

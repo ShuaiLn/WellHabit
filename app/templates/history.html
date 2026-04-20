@@ -24,7 +24,7 @@
                     <p class="eyebrow">AI impact</p>
                     <div class="history-impact-grid">
                         {% for impact in entry.impacts %}
-                            <div class="history-impact-row">
+                            <div class="history-impact-row metric-{{ impact.key }}">
                                 <span>{{ impact.label }}</span>
                                 <strong class="{% if impact.value > 0 %}impact-plus{% elif impact.value < 0 %}impact-minus{% else %}impact-zero{% endif %}">{{ impact.signed }}</strong>
                             </div>

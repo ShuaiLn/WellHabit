@@ -5,6 +5,7 @@ import json
 import math
 import re
 from datetime import date, datetime, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from flask import flash, has_request_context, jsonify, redirect, render_template, request, session, url_for
@@ -13,11 +14,16 @@ from flask_login import current_user, login_required, login_user, logout_user
 from . import db
 from .ai_services import (
     analyze_meal_text,
+    analyze_text_mood,
+    care_chat_reply,
     convert_drink_amount_to_ml,
+    mood_display_label,
+    mood_value_for_label,
     suggest_personal_goals,
+    summarize_care_chat_session,
     update_wellness_scores,
 )
-from .models import ActivityEntry, CalendarEvent, DailyLog, HydrationPrompt, PomodoroSession, Task, User
+from .models import ActivityEntry, CalendarEvent, DailyLog, HydrationPrompt, MoodEntry, PomodoroSession, Task, User
 
 LOCAL_TZ = ZoneInfo('America/Los_Angeles')
 GLASS_VOLUME_ML = 250
@@ -37,6 +43,184 @@ MEAL_TASKS = [
     ('Dinner', 'dinner'),
 ]
 
+MOOD_OPTIONS = [
+    ('happy', 'Happy'),
+    ('normal', 'Normal'),
+    ('sad', 'Sad'),
+    ('custom', 'Write my own mood'),
+]
+
+EMOJI_MOOD_CHOICES = [
+    {'emoji': '😁', 'label': 'happy', 'title': 'Happy'},
+    {'emoji': '😄', 'label': 'happy', 'title': 'Excited'},
+    {'emoji': '🤩', 'label': 'happy', 'title': 'Thrilled'},
+    {'emoji': '🥳', 'label': 'happy', 'title': 'Celebrating'},
+    {'emoji': '😊', 'label': 'happy', 'title': 'Warm'},
+    {'emoji': '😌', 'label': 'calm', 'title': 'Calm'},
+    {'emoji': '🙂', 'label': 'normal', 'title': 'Okay'},
+    {'emoji': '😶', 'label': 'normal', 'title': 'Quiet'},
+    {'emoji': '😴', 'label': 'exhausted', 'title': 'Sleepy'},
+    {'emoji': '🥱', 'label': 'exhausted', 'title': 'Drained'},
+    {'emoji': '😮‍💨', 'label': 'exhausted', 'title': 'Worn out'},
+    {'emoji': '😢', 'label': 'sad', 'title': 'Sad'},
+    {'emoji': '😭', 'label': 'sad', 'title': 'Crying'},
+    {'emoji': '💔', 'label': 'sad', 'title': 'Heartbroken'},
+    {'emoji': '😰', 'label': 'anxious', 'title': 'Anxious'},
+    {'emoji': '😟', 'label': 'anxious', 'title': 'Worried'},
+    {'emoji': '😣', 'label': 'stressed', 'title': 'Stressed'},
+    {'emoji': '😤', 'label': 'stressed', 'title': 'Frustrated'},
+    {'emoji': '😡', 'label': 'stressed', 'title': 'Angry'},
+    {'emoji': '😵‍💫', 'label': 'overwhelmed', 'title': 'Overwhelmed'},
+    {'emoji': '🤯', 'label': 'mixed', 'title': 'Mixed'},
+    {'emoji': '🥹', 'label': 'hopeful', 'title': 'Hopeful'},
+    {'emoji': '🌤️', 'label': 'hopeful', 'title': 'Looking up'},
+]
+
+EMOJI_LABEL_LOOKUP = {item['emoji']: item['label'] for item in EMOJI_MOOD_CHOICES}
+EMOJI_BY_LABEL = {item['label']: item['emoji'] for item in EMOJI_MOOD_CHOICES}
+
+MOOD_COLOR_MAP = {
+    'happy': '#22c55e',
+    'normal': '#64748b',
+    'sad': '#ec4899',
+    'anxious': '#f97316',
+    'exhausted': '#a855f7',
+    'stressed': '#ef4444',
+    'calm': '#0ea5e9',
+    'overwhelmed': '#7c3aed',
+    'hopeful': '#14b8a6',
+    'mixed': '#8b5cf6',
+    'custom': '#64748b',
+}
+
+
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+USERNAME_RE = re.compile(r'^[A-Za-z0-9_.-]{3,30}$')
+
+
+def _clean_text(value: str | None, max_length: int | None = None) -> str:
+    cleaned = (value or '').strip()
+    if max_length is not None:
+        cleaned = cleaned[:max_length]
+    return cleaned
+
+
+def _is_valid_email(value: str) -> bool:
+    return bool(EMAIL_RE.match((value or '').strip()))
+
+
+
+def _normalize_mood_choice(mood_label: str | None, custom_text: str | None = None) -> tuple[str, str | None]:
+    raw = (mood_label or '').strip().lower()
+    aliases = {
+        '开心': 'happy',
+        '普通': 'normal',
+        '伤心': 'sad',
+        'custom': 'custom',
+        'other': 'custom',
+    }
+    normalized = aliases.get(raw, raw or 'normal')
+    custom_clean = (custom_text or '').strip()[:120] or None
+    if normalized not in {'happy', 'normal', 'sad', 'custom', 'anxious', 'exhausted', 'stressed', 'calm', 'overwhelmed', 'hopeful', 'mixed'}:
+        normalized = 'custom' if custom_clean else 'normal'
+    if normalized != 'custom':
+        custom_clean = None
+    return normalized, custom_clean
+
+
+def _mood_badge_payload(mood_label: str | None, custom_text: str | None = None) -> dict:
+    normalized, custom_clean = _normalize_mood_choice(mood_label, custom_text)
+    display = mood_display_label(normalized, custom_clean)
+    color = MOOD_COLOR_MAP.get(normalized, '#64748b')
+    return {
+        'label': normalized,
+        'display': display,
+        'value': mood_value_for_label(normalized, custom_clean),
+        'color': color,
+    }
+
+
+def _selected_mood_emoji(mood_label: str | None) -> str:
+    return EMOJI_BY_LABEL.get((mood_label or '').strip().lower(), '')
+
+
+def _record_mood_entry(user_id: int, source: str, mood_label: str | None, custom_text: str | None = None, summary: str | None = None, log: DailyLog | None = None, event_at: datetime | None = None, detected_by: str = 'user') -> MoodEntry:
+    normalized, custom_clean = _normalize_mood_choice(mood_label, custom_text)
+    mood_entry = MoodEntry(
+        user_id=user_id,
+        log_id=getattr(log, 'id', None),
+        source=(source or 'journal')[:30],
+        mood_label=normalized,
+        mood_custom_text=custom_clean,
+        mood_value=mood_value_for_label(normalized, custom_clean),
+        summary=(summary or '').strip() or None,
+        detected_by=(detected_by or 'user')[:20],
+        event_at=(event_at or local_now()).replace(tzinfo=None),
+    )
+    db.session.add(mood_entry)
+    db.session.flush()
+    return mood_entry
+
+
+def _build_mood_trend_payload(user_id: int, days: int = 14) -> dict:
+    start_dt = (local_now() - timedelta(days=max(1, days) - 1)).replace(tzinfo=None)
+    rows = MoodEntry.query.filter(
+        MoodEntry.user_id == user_id,
+        MoodEntry.event_at >= start_dt,
+    ).order_by(MoodEntry.event_at.asc()).all()
+
+    by_day = {}
+    for row in rows:
+        day_key = row.event_at.date().isoformat()
+        bucket = by_day.setdefault(day_key, {'values': [], 'latest': row})
+        bucket['values'].append(int(row.mood_value or 50))
+        if row.event_at >= bucket['latest'].event_at:
+            bucket['latest'] = row
+
+    points = []
+    current_day = start_dt.date()
+    end_day = local_today()
+    last_value = 50
+    while current_day <= end_day:
+        key = current_day.isoformat()
+        bucket = by_day.get(key)
+        if bucket:
+            last_value = int(round(sum(bucket['values']) / max(1, len(bucket['values']))))
+            latest = bucket['latest']
+            badge = _mood_badge_payload(latest.mood_label, latest.mood_custom_text)
+            points.append({
+                'date': key,
+                'short_date': current_day.strftime('%m/%d'),
+                'value': last_value,
+                'display': badge['display'],
+                'color': badge['color'],
+            })
+        else:
+            points.append({
+                'date': key,
+                'short_date': current_day.strftime('%m/%d'),
+                'value': last_value,
+                'display': 'No new entry',
+                'color': '#cbd5e1',
+            })
+        current_day += timedelta(days=1)
+
+    recent_entries = []
+    for row in reversed(rows[-8:]):
+        badge = _mood_badge_payload(row.mood_label, row.mood_custom_text)
+        recent_entries.append({
+            'source': row.source.replace('_', ' '),
+            'display': badge['display'],
+            'summary': row.summary,
+            'event_at': row.event_at,
+            'color': badge['color'],
+        })
+
+    return {
+        'points': points,
+        'recent_entries': recent_entries,
+        'latest': recent_entries[0] if recent_entries else None,
+    }
 
 
 def local_now() -> datetime:
@@ -50,9 +234,13 @@ def local_today() -> date:
 
 
 def _parse_date(value: str, fallback: date | None = None) -> date:
-    if not value:
+    clean = (value or '').strip()
+    if not clean:
         return fallback or local_today()
-    return datetime.strptime(value, '%Y-%m-%d').date()
+    try:
+        return datetime.strptime(clean, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return fallback or local_today()
 
 
 
@@ -60,23 +248,51 @@ def _parse_time(value: str | None):
     clean = (value or '').strip()
     if not clean:
         return None
-    return datetime.strptime(clean, '%H:%M').time()
-
-
-
-def _parse_int(value, default=0):
     try:
-        return int(float(value))
+        return datetime.strptime(clean, '%H:%M').time()
+    except (TypeError, ValueError):
+        return None
+
+
+
+def _parse_int(value, default=0, minimum=None, maximum=None):
+    try:
+        parsed = int(float(str(value).strip()))
     except (TypeError, ValueError):
         return default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
 
 
 
-def _parse_float(value, default=0.0):
+def _parse_float(value, default=0.0, minimum=None, maximum=None):
     try:
-        return float(value)
+        parsed = float(str(value).strip())
     except (TypeError, ValueError):
         return default
+    if math.isnan(parsed) or math.isinf(parsed):
+        return default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def _normalize_care_messages(raw_messages) -> list[dict[str, str]]:
+    normalized = []
+    for item in raw_messages or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get('role') or '').strip().lower()
+        content = str(item.get('content') or '').strip()
+        if role not in {'user', 'assistant'} or not content:
+            continue
+        normalized.append({'role': role, 'content': content[:1200]})
+    return normalized[-20:]
 
 
 
@@ -365,12 +581,38 @@ def _profile_locked(user: User) -> bool:
 
 
 def _get_or_create_log_for_date(user_id: int, log_date: date) -> DailyLog:
-    log = DailyLog.query.filter_by(user_id=user_id, log_date=log_date).first()
-    if not log:
+    logs = DailyLog.query.filter_by(user_id=user_id, log_date=log_date).order_by(DailyLog.id.asc()).all()
+    if not logs:
         log = DailyLog(user_id=user_id, log_date=log_date)
         db.session.add(log)
         db.session.flush()
-    return log
+        return log
+
+    primary = logs[-1]
+    for duplicate in logs[:-1]:
+        primary.water_ml = max(int(primary.water_ml or 0), int(duplicate.water_ml or 0))
+        primary.sleep_hours = max(float(primary.sleep_hours or 0), float(duplicate.sleep_hours or 0))
+        primary.steps = max(int(primary.steps or 0), int(duplicate.steps or 0))
+        primary.exercise_minutes = max(int(primary.exercise_minutes or 0), int(duplicate.exercise_minutes or 0))
+        if duplicate.notes and not primary.notes:
+            primary.notes = duplicate.notes
+        if duplicate.journal_text and not primary.journal_text:
+            primary.journal_text = duplicate.journal_text
+        if duplicate.mood_label and not primary.mood_label:
+            primary.mood_label = duplicate.mood_label
+        if duplicate.mood_custom_text and not primary.mood_custom_text:
+            primary.mood_custom_text = duplicate.mood_custom_text
+        if duplicate.activity_text:
+            merged = '\n'.join(part for part in [primary.activity_text or '', duplicate.activity_text] if part).strip()
+            primary.activity_text = merged[:4000] or None
+        if duplicate.ai_feedback and not primary.ai_feedback:
+            primary.ai_feedback = duplicate.ai_feedback
+        primary.ai_meal_detected = bool(primary.ai_meal_detected or duplicate.ai_meal_detected)
+        primary.ai_meal_confidence = primary.ai_meal_confidence or duplicate.ai_meal_confidence
+        primary.last_meal_detected_at = primary.last_meal_detected_at or duplicate.last_meal_detected_at
+        db.session.delete(duplicate)
+    db.session.flush()
+    return primary
 
 
 
@@ -379,9 +621,14 @@ def _get_or_create_log_for_today(user_id: int) -> DailyLog:
 
 
 
+def _normalize_beverage(user_id: int) -> DailyLog:
+    return _get_or_create_log_for_date(user_id, local_today())
+
+
+
 def _normalize_beverage(beverage: str, custom_beverage: str = '') -> str:
-    beverage_value = (beverage or 'water').strip().lower()
-    custom_value = (custom_beverage or '').strip()
+    beverage_value = _clean_text(beverage or 'water', 60).lower()
+    custom_value = _clean_text(custom_beverage, 120)
     if beverage_value == 'other':
         return custom_value or 'water'
     return beverage_value or 'water'
@@ -653,6 +900,8 @@ def _build_log_payload(log: DailyLog | None) -> dict:
         'steps': int(log.steps or 0) if log else 0,
         'exercise_minutes': int(log.exercise_minutes or 0) if log else 0,
         'journal_text': log.journal_text if log else '',
+        'mood_label': (log.mood_label if log else '') or '',
+        'mood_custom_text': (log.mood_custom_text if log else '') or '',
         'activity_text': log.activity_text if log else '',
         'notes': '',
     }
@@ -997,12 +1246,96 @@ def _update_log_meal_insight(user_id: int, log: DailyLog, candidate_text: str) -
 
 
 
+def _format_glasses(ml_value: int | float | None) -> str:
+    glasses = max(float(ml_value or 0) / GLASS_VOLUME_ML, 0)
+    if abs(glasses - round(glasses)) < 1e-9:
+        glasses_text = str(int(round(glasses)))
+    else:
+        glasses_text = f"{glasses:.1f}".rstrip('0').rstrip('.')
+    return f"{glasses_text} glass{'es' if glasses_text != '1' else ''}"
+
+
+
+def _build_glass_progress(current_ml: int | float | None, goal_ml: int | float | None) -> dict:
+    current_ml = max(int(current_ml or 0), 0)
+    goal_ml = max(int(goal_ml or 0), GLASS_VOLUME_ML)
+    total_glasses = max(1, math.ceil(goal_ml / GLASS_VOLUME_ML))
+    current_glasses = max(current_ml / GLASS_VOLUME_ML, 0)
+    capped_glasses = min(current_glasses, float(total_glasses))
+    whole_glasses = int(capped_glasses)
+    partial_percent = int(round((capped_glasses - whole_glasses) * 100))
+
+    segments = []
+    for index in range(total_glasses):
+        if index < whole_glasses:
+            fill_percent = 100
+            state = 'full'
+        elif index == whole_glasses and partial_percent > 0:
+            fill_percent = partial_percent
+            state = 'partial'
+        else:
+            fill_percent = 0
+            state = 'empty'
+        segments.append({
+            'index': index + 1,
+            'fill_percent': fill_percent,
+            'state': state,
+        })
+
+    remaining_ml = max(goal_ml - current_ml, 0)
+    return {
+        'current_glasses': capped_glasses,
+        'current_display': _format_glasses(current_ml),
+        'total_display': _format_glasses(goal_ml),
+        'goal_ml': goal_ml,
+        'current_ml': current_ml,
+        'percent': max(0, min(100, int(round((current_ml / goal_ml) * 100)))) if goal_ml else 0,
+        'remaining_text': 'Goal reached' if remaining_ml <= 0 else f"{remaining_ml} ml left today",
+        'segments': segments,
+    }
+
+
+
+def _activity_entry_view_model(entry: ActivityEntry, compact: bool = False) -> dict:
+    description, _ = _split_activity_description(entry.description)
+    impacts = _history_entry_impacts(entry)
+    if compact:
+        non_zero = [item for item in impacts if int(item.get('value', 0) or 0) != 0]
+        impacts = (non_zero[:3] if non_zero else impacts[:1])
+    return {
+        'row': entry,
+        'title': entry.title,
+        'entry_type': (entry.entry_type or '').replace('_', ' '),
+        'description': description,
+        'impacts': impacts,
+        'event_at': entry.event_at,
+    }
+
+
+
 def _build_goal_cards(user: User):
+    water_goal_ml = int(user.daily_water_goal_ml or 0)
     return [
-        {'label': 'Daily Water Goal (ml)', 'value': int(user.daily_water_goal_ml or 0)},
-        {'label': 'Sleep Goal (hours)', 'value': f"{float(user.daily_sleep_goal_hours or 0):g}"},
-        {'label': 'Step Goal', 'value': int(user.daily_step_goal or 0)},
-        {'label': 'Exercise Goal (minutes)', 'value': int(user.daily_exercise_goal_minutes or 30)},
+        {
+            'label': 'Daily Water Goal',
+            'value': f"{water_goal_ml} ml",
+            'subtitle': f"≈ {_format_glasses(water_goal_ml)}",
+        },
+        {
+            'label': 'Sleep Goal',
+            'value': f"{float(user.daily_sleep_goal_hours or 0):g} h",
+            'subtitle': 'Recommended nightly sleep target',
+        },
+        {
+            'label': 'Step Goal',
+            'value': f"{int(user.daily_step_goal or 0)} steps",
+            'subtitle': 'Daily movement target',
+        },
+        {
+            'label': 'Exercise Goal',
+            'value': f"{int(user.daily_exercise_goal_minutes or 30)} min",
+            'subtitle': 'Intentional exercise goal',
+        },
     ]
 
 
@@ -1025,23 +1358,30 @@ def _build_progress_cards(user: User, log: DailyLog | None):
         safe_goal = max(float(goal or 0), 1.0)
         return max(0, min(100, int(round((float(value or 0) / safe_goal) * 100))))
 
+    water_goal_ml = int(user.daily_water_goal_ml or 0)
     return [
         {
+            'key': 'water',
             'label': 'Water',
-            'value': f"{snapshot['water_ml']} / {int(user.daily_water_goal_ml or 0)} ml",
-            'percent': percent(snapshot['water_ml'], user.daily_water_goal_ml),
+            'value': f"{snapshot['water_ml']} / {water_goal_ml} ml",
+            'percent': percent(snapshot['water_ml'], water_goal_ml),
+            'glass_progress': _build_glass_progress(snapshot['water_ml'], water_goal_ml),
+            'toggle_hint': 'Tap to show glass progress',
         },
         {
+            'key': 'sleep',
             'label': 'Sleep',
             'value': f"{snapshot['sleep_hours']:g} / {float(user.daily_sleep_goal_hours or 0):g} h",
             'percent': percent(snapshot['sleep_hours'], user.daily_sleep_goal_hours),
         },
         {
+            'key': 'steps',
             'label': 'Steps',
             'value': f"{snapshot['steps']} / {int(user.daily_step_goal or 0)}",
             'percent': percent(snapshot['steps'], user.daily_step_goal),
         },
         {
+            'key': 'exercise',
             'label': 'Exercise',
             'value': f"{snapshot['exercise_minutes']} / {int(user.daily_exercise_goal_minutes or 30)} min",
             'percent': percent(snapshot['exercise_minutes'], user.daily_exercise_goal_minutes or 30),
@@ -1115,7 +1455,8 @@ def _build_streak_cards(user: User):
 
 
 def _recent_activity_preview(user_id: int, limit: int = 8):
-    return ActivityEntry.query.filter_by(user_id=user_id).order_by(ActivityEntry.event_at.desc()).limit(limit).all()
+    rows = ActivityEntry.query.filter_by(user_id=user_id).order_by(ActivityEntry.event_at.desc()).limit(limit).all()
+    return [_activity_entry_view_model(row, compact=True) for row in rows]
 
 
 
@@ -1129,7 +1470,7 @@ def register_routes(app):
     def inject_nav_context():
         return {
             'nav_local_date': local_now().strftime('%A, %B %d, %Y'),
-            'nav_local_time': local_now().strftime('%I:%M:%S %p'),
+            'nav_local_time': local_now().strftime('%I:%M %p'),
             'pending_wellness_feedback': _consume_wellness_feedback(),
         }
 
@@ -1145,13 +1486,22 @@ def register_routes(app):
             return redirect(url_for('dashboard'))
 
         if request.method == 'POST':
-            username = request.form.get('username', '').strip()
-            email = request.form.get('email', '').strip().lower()
+            username = _clean_text(request.form.get('username'), 30)
+            email = _clean_text(request.form.get('email'), 120).lower()
             password = request.form.get('password', '')
             confirm_password = request.form.get('confirm_password', '')
 
             if not username or not email or not password:
                 flash('Please fill in all required fields.', 'danger')
+                return render_template('register.html')
+            if not USERNAME_RE.match(username):
+                flash('Username must be 3 to 30 characters and use only letters, numbers, dots, underscores, or hyphens.', 'danger')
+                return render_template('register.html')
+            if not _is_valid_email(email):
+                flash('Please enter a valid email address.', 'danger')
+                return render_template('register.html')
+            if len(password) < 8:
+                flash('Password must be at least 8 characters long.', 'danger')
                 return render_template('register.html')
             if password != confirm_password:
                 flash('Passwords do not match.', 'danger')
@@ -1175,7 +1525,7 @@ def register_routes(app):
             return redirect(url_for('dashboard'))
 
         if request.method == 'POST':
-            email = request.form.get('email', '').strip().lower()
+            email = _clean_text(request.form.get('email'), 120).lower()
             password = request.form.get('password', '')
             user = User.query.filter_by(email=email).first()
 
@@ -1213,11 +1563,13 @@ def register_routes(app):
         today_log = DailyLog.query.filter_by(user_id=current_user.id, log_date=today).first()
 
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
+        db.session.commit()
         morning_prompt_record = HydrationPrompt.query.filter(
             HydrationPrompt.user_id == current_user.id,
             HydrationPrompt.prompt_type == 'morning',
+            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
             db.func.date(HydrationPrompt.due_at) == today,
-        ).first()
+        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
 
         return render_template(
             'dashboard.html',
@@ -1229,6 +1581,7 @@ def register_routes(app):
             today_log=today_log,
             due_hydration_prompt=_serialize_prompt(due_prompt),
             upcoming_hydration_prompt=_serialize_prompt(upcoming_prompt),
+            morning_hydration_prompt=_serialize_prompt(morning_prompt_record),
             morning_prompt_exists=bool(morning_prompt_record),
             recent_activity_entries=_recent_activity_preview(current_user.id, 6),
         )
@@ -1240,6 +1593,21 @@ def register_routes(app):
         locked = _profile_locked(current_user)
 
         if request.method == 'POST':
+            action = (request.form.get('action') or 'save_profile').strip().lower()
+
+            if action == 'update_exercise_goal':
+                exercise_goal = _parse_int(request.form.get('daily_exercise_goal_minutes'), default=None)
+                if exercise_goal is None:
+                    flash('Please enter an exercise goal in minutes.', 'danger')
+                    return redirect(url_for('profile'))
+                if not (5 <= exercise_goal <= 300):
+                    flash('Exercise goal should be between 5 and 300 minutes.', 'danger')
+                    return redirect(url_for('profile'))
+                current_user.daily_exercise_goal_minutes = exercise_goal
+                db.session.commit()
+                flash('Daily training intensity was updated.', 'success')
+                return redirect(url_for('profile'))
+
             if locked:
                 flash('Basic information is already locked after the first save.', 'warning')
                 return redirect(url_for('profile'))
@@ -1254,6 +1622,15 @@ def register_routes(app):
 
             if age is None or weight_kg is None or height_cm is None:
                 flash('Please fill age, weight, and height once.', 'danger')
+                return redirect(url_for('profile'))
+            if not (5 <= age <= 120):
+                flash('Age should be between 5 and 120.', 'danger')
+                return redirect(url_for('profile'))
+            if not (20 <= float(weight_kg) <= 400):
+                flash('Weight should be between 20 and 400 kg.', 'danger')
+                return redirect(url_for('profile'))
+            if not (80 <= float(height_cm) <= 260):
+                flash('Height should be between 80 and 260 cm.', 'danger')
                 return redirect(url_for('profile'))
 
             current_user.age = age
@@ -1284,31 +1661,30 @@ def register_routes(app):
             today_progress=_progress_snapshot(current_user, today_log),
             progress_cards=_build_progress_cards(current_user, today_log),
             quick_stats_cards=_build_quick_stats(current_user.id, local_today()),
+            mood_trend=_build_mood_trend_payload(current_user.id, 14),
         )
 
     @app.route('/history')
     @login_required
     def history_view():
         raw_entries = ActivityEntry.query.filter_by(user_id=current_user.id).order_by(ActivityEntry.event_at.desc()).limit(150).all()
-        entries = [
-            {
-                'row': entry,
-                'description': _split_activity_description(entry.description)[0],
-                'impacts': _history_entry_impacts(entry),
-            }
-            for entry in raw_entries
-        ]
+        entries = [_activity_entry_view_model(entry) for entry in raw_entries]
         return render_template('history.html', entries=entries)
 
     @app.route('/activity/update', methods=['POST'])
     @login_required
     def update_activity():
-        activity_text = request.form.get('activity_text', '').strip()
+        activity_text = _clean_text(request.form.get('activity_text'), 500)
         if not activity_text:
             flash('Please write what you just did first.', 'danger')
             return redirect(url_for('dashboard'))
 
-        chosen_time = _parse_time(request.form.get('activity_time')) or local_now().time().replace(second=0, microsecond=0)
+        raw_activity_time = (request.form.get('activity_time') or '').strip()
+        chosen_time = _parse_time(raw_activity_time)
+        if raw_activity_time and not chosen_time:
+            flash('Please enter a valid activity time.', 'warning')
+            return redirect(url_for('dashboard'))
+        chosen_time = chosen_time or local_now().time().replace(second=0, microsecond=0)
         chosen_dt = datetime.combine(local_today(), chosen_time)
         log = _get_or_create_log_for_today(current_user.id)
         timestamp = chosen_time.strftime('%H:%M')
@@ -1317,16 +1693,23 @@ def register_routes(app):
         log.activity_text = entry if not existing else f'{entry}\n{existing}'
 
         _add_calendar_event(current_user.id, f'What just did: {activity_text[:80]}', log.log_date, chosen_time, activity_text)
-        auto_task = Task(
+        existing_auto_task = Task.query.filter_by(
             user_id=current_user.id,
             title=activity_text[:200],
-            description=None,
             task_date=log.log_date,
             completed=True,
-            completed_at=chosen_dt,
-            sort_order=_get_next_sort_order(current_user.id, log.log_date),
-        )
-        db.session.add(auto_task)
+        ).filter(Task.description.like('Auto-added from What just did%')).order_by(Task.id.desc()).first()
+        if not existing_auto_task or not existing_auto_task.completed_at or existing_auto_task.completed_at.strftime('%H:%M') != chosen_time.strftime('%H:%M'):
+            auto_task = Task(
+                user_id=current_user.id,
+                title=activity_text[:200],
+                description=f'Auto-added from What just did · {timestamp}',
+                task_date=log.log_date,
+                completed=True,
+                completed_at=chosen_dt,
+                sort_order=_get_next_sort_order(current_user.id, log.log_date),
+            )
+            db.session.add(auto_task)
         _log_activity_entry(current_user.id, 'activity', 'What just did updated', activity_text, event_at=chosen_dt)
 
         meal_detected = _update_log_meal_insight(current_user.id, log, activity_text)
@@ -1364,20 +1747,34 @@ def register_routes(app):
                         return redirect(url_for('logs', date=selected_date.isoformat()))
                     sleep_start = _parse_time(sleep_start_raw)
                     sleep_end = _parse_time(sleep_end_raw)
+                    if not sleep_start or not sleep_end:
+                        flash('Please enter a valid sleep time range.', 'warning')
+                        return redirect(url_for('logs', date=selected_date.isoformat()))
                     sleep_start_dt = datetime.combine(selected_date, sleep_start)
                     sleep_end_dt = datetime.combine(selected_date, sleep_end)
                     if sleep_end_dt <= sleep_start_dt:
                         sleep_end_dt += timedelta(days=1)
                     sleep_hours_value = round((sleep_end_dt - sleep_start_dt).total_seconds() / 3600.0, 2)
+                    if sleep_hours_value <= 0 or sleep_hours_value > 24:
+                        flash('Sleep hours must stay between 0 and 24.', 'warning')
+                        return redirect(url_for('logs', date=selected_date.isoformat()))
                     log.sleep_hours = sleep_hours_value
                     changes.append(f'sleep {sleep_hours_value:g} h ({sleep_start_raw}-{sleep_end_raw})')
             elif sleep_raw:
-                log.sleep_hours = float(sleep_raw)
+                parsed_sleep_hours = _parse_float(sleep_raw, default=None)
+                if parsed_sleep_hours is None or parsed_sleep_hours < 0 or parsed_sleep_hours > 24:
+                    flash('Sleep hours must stay between 0 and 24.', 'warning')
+                    return redirect(url_for('logs', date=selected_date.isoformat()))
+                log.sleep_hours = float(parsed_sleep_hours)
                 changes.append(f'sleep {log.sleep_hours:g} h')
 
             steps_raw = (request.form.get('steps') or '').strip()
             if steps_raw:
-                log.steps = int(float(steps_raw))
+                parsed_steps = _parse_int(steps_raw, default=None)
+                if parsed_steps is None or parsed_steps < 0 or parsed_steps > 200000:
+                    flash('Steps must be a number between 0 and 200000.', 'warning')
+                    return redirect(url_for('logs', date=selected_date.isoformat()))
+                log.steps = parsed_steps
                 changes.append(f'steps {log.steps}')
 
             exercise_name = (request.form.get('exercise_name') or '').strip()
@@ -1391,8 +1788,14 @@ def register_routes(app):
                     flash('For exercise, fill reps or minutes.', 'warning')
                     return redirect(url_for('logs', date=selected_date.isoformat()))
 
-                exercise_minutes = int(float(exercise_raw)) if exercise_raw else 0
-                exercise_reps = int(float(exercise_reps_raw)) if exercise_reps_raw else 0
+                exercise_minutes = _parse_int(exercise_raw, default=None) if exercise_raw else 0
+                exercise_reps = _parse_int(exercise_reps_raw, default=None) if exercise_reps_raw else 0
+                if exercise_minutes is None or exercise_reps is None:
+                    flash('Exercise minutes and reps must be valid numbers.', 'warning')
+                    return redirect(url_for('logs', date=selected_date.isoformat()))
+                if exercise_minutes < 0 or exercise_minutes > 1440 or exercise_reps < 0 or exercise_reps > 100000:
+                    flash('Exercise minutes or reps are outside a reasonable range.', 'warning')
+                    return redirect(url_for('logs', date=selected_date.isoformat()))
                 if exercise_minutes:
                     log.exercise_minutes = exercise_minutes
                 note_parts = [f'Exercise: {exercise_name}']
@@ -1411,16 +1814,45 @@ def register_routes(app):
                 changes.append(change_text)
                 _log_activity_entry(current_user.id, 'exercise', 'Exercise updated', exercise_note)
 
-            journal_text = (request.form.get('journal_text') or '').strip()
+            journal_text = _clean_text(request.form.get('journal_text'), 5000)
             if journal_text:
                 log.journal_text = journal_text
                 changes.append('journal updated')
+
+            mood_emoji_raw = _clean_text(request.form.get('journal_mood_emoji'), 16)
+            mood_selected = bool(mood_emoji_raw)
+            mood_entry_summary = None
+            mood_detected_by = 'user'
+            if mood_selected:
+                preferred_label = EMOJI_LABEL_LOOKUP.get(mood_emoji_raw)
+                mood_analysis_seed = ' '.join(part for part in [mood_emoji_raw, journal_text] if part).strip() or mood_emoji_raw
+                mood_analysis = analyze_text_mood(mood_analysis_seed, preferred=preferred_label or mood_emoji_raw)
+                mood_choice, _ = _normalize_mood_choice(mood_analysis.get('mood_label'), '')
+                mood_badge = _mood_badge_payload(mood_choice, None)
+                mood_detected_by = 'ai' if mood_analysis.get('source') == 'ai' else 'emoji'
+                mood_note = ' Journal text helped refine the mood.' if journal_text else ''
+                mood_entry_summary = f"Emoji {mood_emoji_raw} was analyzed as {mood_badge['display']}.{mood_note}"
+                log.mood_label = mood_choice
+                log.mood_custom_text = None
+                changes.append(f"mood {mood_badge['display']}")
 
             if not changes:
                 flash('Fill at least one field to update the daily log.', 'warning')
                 return redirect(url_for('logs', date=selected_date.isoformat()))
 
-            candidate_text = ' '.join(part for part in [log.activity_text or '', log.journal_text or ''] if part).strip()
+            if mood_selected:
+                _record_mood_entry(
+                    current_user.id,
+                    'journal',
+                    log.mood_label,
+                    mood_emoji_raw,
+                    summary=mood_entry_summary or 'Journal mood updated.',
+                    log=log,
+                    event_at=datetime.combine(selected_date, datetime.min.time()),
+                    detected_by=mood_detected_by,
+                )
+
+            candidate_text = ' '.join(part for part in [log.activity_text or '', log.journal_text or '', log.mood_custom_text or '', log.mood_label or ''] if part).strip()
             meal_detected = _update_log_meal_insight(current_user.id, log, candidate_text)
             latest_event = 'Daily log updated: ' + ', '.join(changes)
             payload = _apply_wellness_update(current_user, selected_date, latest_event)
@@ -1433,7 +1865,13 @@ def register_routes(app):
         current_log = DailyLog.query.filter_by(user_id=current_user.id, log_date=selected_date).first()
         all_logs = DailyLog.query.filter_by(user_id=current_user.id).order_by(DailyLog.log_date.desc()).all()
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
-        morning_prompt_record = None
+        db.session.commit()
+        morning_prompt_record = HydrationPrompt.query.filter(
+            HydrationPrompt.user_id == current_user.id,
+            HydrationPrompt.prompt_type == 'morning',
+            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
+            db.func.date(HydrationPrompt.due_at) == local_today(),
+        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
         return render_template(
             'logs.html',
             current_log=current_log,
@@ -1441,8 +1879,12 @@ def register_routes(app):
             all_logs=all_logs,
             due_hydration_prompt=_serialize_prompt(due_prompt),
             upcoming_hydration_prompt=_serialize_prompt(upcoming_prompt),
+            morning_hydration_prompt=_serialize_prompt(morning_prompt_record),
             morning_prompt_exists=bool(morning_prompt_record),
             current_snapshot=_progress_snapshot(current_user, current_log),
+            mood_options=MOOD_OPTIONS,
+            mood_emoji_choices=EMOJI_MOOD_CHOICES,
+            selected_mood_emoji=_selected_mood_emoji(getattr(current_log, 'mood_label', None)),
         )
 
     @app.route('/calendar')
@@ -1515,18 +1957,23 @@ def register_routes(app):
     @app.route('/tasks/add', methods=['POST'])
     @login_required
     def add_task():
-        title = request.form.get('title', '').strip()
-        description = request.form.get('description', '').strip()
+        title = _clean_text(request.form.get('title'), 200)
+        description = _clean_text(request.form.get('description'), 1000)
         task_date = _parse_date(request.form.get('task_date'))
 
         if not title:
             flash('Task title is required.', 'danger')
             return redirect(request.referrer or url_for('calendar_view'))
 
+        existing_task = Task.query.filter_by(user_id=current_user.id, task_date=task_date, title=title, completed=False).first()
+        if existing_task:
+            flash('That task is already in the list for this day.', 'warning')
+            return redirect(request.referrer or url_for('calendar_view', year=task_date.year, month=task_date.month, selected_date=task_date.isoformat()))
+
         task = Task(
             user_id=current_user.id,
             title=title,
-            description=description,
+            description=description or None,
             task_type='regular',
             task_date=task_date,
             sort_order=_get_next_sort_order(current_user.id, task_date),
@@ -1541,21 +1988,31 @@ def register_routes(app):
     @login_required
     def toggle_task(task_id):
         task = Task.query.filter_by(id=task_id, user_id=current_user.id).first_or_404()
+        was_completed = bool(task.completed)
         task.completed = not task.completed
         task.completed_at = local_now().replace(tzinfo=None) if task.completed else None
         event_label = f'Completed todo: {task.title}' if task.completed else f'Reopened todo: {task.title}'
         payload = None
 
-        if task.task_date == local_today() and task.completed:
-            if _task_is_hydration(task):
-                beverage = _infer_beverage_from_text(task.title)
-                amount_ml = int(convert_drink_amount_to_ml(beverage, task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
-                log = _get_or_create_log_for_date(current_user.id, task.task_date)
-                log.water_ml = int(log.water_ml or 0) + amount_ml
+        if _task_is_hydration(task):
+            log = _get_or_create_log_for_date(current_user.id, task.task_date)
+            if task.completed and task.task_date == local_today():
+                amount_ml = int(convert_drink_amount_to_ml(_infer_beverage_from_text(task.title), task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
+                if not int(task.auto_tracked_water_ml or 0):
+                    log.water_ml = int(log.water_ml or 0) + amount_ml
+                    task.auto_tracked_water_ml = amount_ml
+                else:
+                    amount_ml = int(task.auto_tracked_water_ml or amount_ml)
                 event_label = f'Completed todo: {task.title} · counted {amount_ml} ml'
-                payload = _apply_wellness_update(current_user, task.task_date, f'Drank {amount_ml} ml of {beverage} from completed todo: {task.title}')
-            elif _task_type(task) == 'regular':
-                payload = _apply_wellness_update(current_user, task.task_date, event_label)
+                payload = _apply_wellness_update(current_user, task.task_date, f'Drank {amount_ml} ml of {_infer_beverage_from_text(task.title)} from completed todo: {task.title}')
+            elif was_completed and not task.completed and int(task.auto_tracked_water_ml or 0):
+                removed_ml = int(task.auto_tracked_water_ml or 0)
+                log.water_ml = max(0, int(log.water_ml or 0) - removed_ml)
+                task.auto_tracked_water_ml = 0
+                event_label = f'Reopened todo: {task.title} · removed {removed_ml} ml'
+                payload = _apply_wellness_update(current_user, task.task_date, f'Removed {removed_ml} ml from reopened hydration todo: {task.title}')
+        elif task.task_date == local_today() and task.completed and _task_type(task) == 'regular':
+            payload = _apply_wellness_update(current_user, task.task_date, event_label)
 
         _log_activity_entry(current_user.id, 'task', 'Task status changed', event_label, impacts=payload.get('feedback', {}).get('metrics') if payload else None)
         db.session.commit()
@@ -1569,7 +2026,7 @@ def register_routes(app):
         if _task_is_meal(task):
             return jsonify({'message': 'Meal tasks are updated from the meal popup.'}), 400
         data = request.get_json(silent=True) or request.form
-        new_title = (data.get('title') or '').strip()
+        new_title = _clean_text(data.get('title'), 200)
         if not new_title:
             return jsonify({'message': 'Task text cannot be empty.'}), 400
 
@@ -1599,8 +2056,12 @@ def register_routes(app):
 
         data = request.get_json(silent=True) or request.form
         meal_status = (data.get('meal_status') or 'finished').strip().lower()
-        meal_text = (data.get('meal_text') or '').strip()
-        meal_time = _parse_time(data.get('meal_time')) or local_now().time().replace(second=0, microsecond=0)
+        meal_text = _clean_text(data.get('meal_text'), 300)
+        raw_meal_time = (data.get('meal_time') or '').strip()
+        meal_time = _parse_time(raw_meal_time)
+        if raw_meal_time and not meal_time:
+            return jsonify({'message': 'Please enter a valid meal time.'}), 400
+        meal_time = meal_time or local_now().time().replace(second=0, microsecond=0)
         chosen_dt = datetime.combine(task.task_date, meal_time)
 
         if meal_status not in {'finished', 'skipped'}:
@@ -1610,6 +2071,7 @@ def register_routes(app):
         task.completed_at = chosen_dt
         if meal_status == 'skipped':
             task.description = f'Skipped · {meal_time.strftime("%H:%M")}'
+            task.auto_tracked_water_ml = 0
             latest_event = f'Skipped meal: {task.title}'
             _log_activity_entry(current_user.id, 'meal', 'Meal skipped', f'{task.title} · {meal_time.strftime("%H:%M")}', event_at=chosen_dt)
             hydration_prompt = None
@@ -1649,7 +2111,15 @@ def register_routes(app):
     @login_required
     def reorder_tasks():
         data = request.get_json(silent=True) or {}
-        task_ids = data.get('task_ids') or []
+        raw_task_ids = data.get('task_ids') or []
+        task_ids = []
+        for raw_id in raw_task_ids:
+            try:
+                task_ids.append(int(raw_id))
+            except (TypeError, ValueError):
+                return jsonify({'message': 'Task list contains an invalid task id.'}), 400
+        if len(set(task_ids)) != len(task_ids):
+            return jsonify({'message': 'Task list contains duplicate ids.'}), 400
         task_date = _parse_date(data.get('task_date'), fallback=local_today())
 
         tasks = Task.query.filter(Task.user_id == current_user.id, Task.task_date == task_date, Task.id.in_(task_ids)).all()
@@ -1666,11 +2136,19 @@ def register_routes(app):
     @app.route('/calendar/events/add', methods=['POST'])
     @login_required
     def add_event():
-        title = request.form.get('title', '').strip()
-        description = request.form.get('description', '').strip()
-        event_date = _parse_date(request.form.get('event_date'))
-        event_time = _parse_time(request.form.get('event_time'))
+        title = _clean_text(request.form.get('title'), 200)
+        description = _clean_text(request.form.get('description'), 2000)
+        raw_event_date = (request.form.get('event_date') or '').strip()
+        event_date = _parse_date(raw_event_date, fallback=local_today())
+        raw_event_time = (request.form.get('event_time') or '').strip()
+        event_time = _parse_time(raw_event_time)
 
+        if raw_event_date and event_date.isoformat() != raw_event_date:
+            flash('Please enter a valid event date.', 'danger')
+            return redirect(url_for('calendar_view', year=local_today().year, month=local_today().month, selected_date=local_today().isoformat()))
+        if raw_event_time and not event_time:
+            flash('Please enter a valid event time.', 'danger')
+            return redirect(url_for('calendar_view', year=event_date.year, month=event_date.month, selected_date=event_date.isoformat()))
         if not title:
             flash('Event title is required.', 'danger')
             return redirect(url_for('calendar_view', year=event_date.year, month=event_date.month, selected_date=event_date.isoformat()))
@@ -1697,10 +2175,10 @@ def register_routes(app):
     @login_required
     def save_pomodoro():
         data = request.get_json(silent=True) or {}
-        focus_minutes = int(data.get('focus_minutes') or 25)
-        break_minutes = int(data.get('break_minutes') or 5)
-        cycle_number = int(data.get('cycle_number') or 1)
-        activity_label = (data.get('activity_label') or 'work').strip() or 'work'
+        focus_minutes = _parse_int(data.get('focus_minutes'), default=25, minimum=1, maximum=180)
+        break_minutes = _parse_int(data.get('break_minutes'), default=5, minimum=1, maximum=60)
+        cycle_number = _parse_int(data.get('cycle_number'), default=1, minimum=1, maximum=50)
+        activity_label = _clean_text(data.get('activity_label') or 'work', 200) or 'work'
         completed_at = local_now().replace(tzinfo=None)
 
         session_row = PomodoroSession(
@@ -1739,6 +2217,98 @@ def register_routes(app):
             }
         )
 
+    @app.route('/care')
+    @login_required
+    def care_chat_page():
+        _ensure_baseline_scores(current_user)
+        care_session_id = uuid4().hex
+        session['care_chat_active_id'] = care_session_id
+        session['care_chat_started_at'] = local_now().isoformat()
+        return render_template(
+            'care_chat.html',
+            wellness_metrics=_serialize_wellness(current_user),
+            care_session_id=care_session_id,
+            care_intro_message=(
+                "I’m here with you. Tell me how you feel, and I’ll respond with your current hydration, energy, fitness, focus, mood, and overall wellness in mind."
+            ),
+        )
+
+    @app.route('/care/message', methods=['POST'])
+    @login_required
+    def care_chat_message():
+        data = request.get_json(silent=True) or {}
+        session_id = str(data.get('session_id') or '').strip()
+        if not session_id or session.get('care_chat_active_id') != session_id:
+            return jsonify({'message': 'This care chat has already ended. Please open a new one.'}), 409
+
+        messages = _normalize_care_messages(data.get('messages'))
+        if not messages or messages[-1]['role'] != 'user':
+            return jsonify({'message': 'Please send a user message first.'}), 400
+
+        reply_payload = care_chat_reply(messages, _score_snapshot(current_user))
+        return jsonify(
+            {
+                'assistant_message': reply_payload.get('reply') or 'I’m here with you.',
+                'risk_level': reply_payload.get('risk_level') or 'low',
+            }
+        )
+
+    @app.route('/care/end', methods=['POST'])
+    @login_required
+    def care_chat_end():
+        data = request.get_json(silent=True) or {}
+        session_id = str(data.get('session_id') or '').strip()
+        active_session_id = session.get('care_chat_active_id')
+
+        if not session_id or not active_session_id or session_id != active_session_id:
+            return jsonify({'ended': True, 'updated': False})
+
+        session.pop('care_chat_active_id', None)
+        session.pop('care_chat_started_at', None)
+        messages = _normalize_care_messages(data.get('messages'))
+        user_message_count = sum(1 for item in messages if item['role'] == 'user')
+        if user_message_count == 0:
+            db.session.commit()
+            return jsonify({'ended': True, 'updated': False})
+
+        summary_payload = summarize_care_chat_session(messages, _score_snapshot(current_user))
+        detected_mood = _normalize_mood_choice(summary_payload.get('detected_mood'), summary_payload.get('detected_mood_display'))
+        mood_badge = _mood_badge_payload(*detected_mood)
+        _record_mood_entry(
+            current_user.id,
+            'care_chat',
+            detected_mood[0],
+            detected_mood[1],
+            summary=summary_payload.get('summary') or 'Care chat mood recorded.',
+            event_at=local_now(),
+            detected_by='ai',
+        )
+        payload = _apply_wellness_update(current_user, local_today(), summary_payload.get('latest_event') or 'Care chat ended')
+        feedback = dict(payload.get('feedback') or {})
+        feedback['care_summary'] = summary_payload.get('summary') or 'A caring AI chat was completed.'
+        feedback['detected_mood'] = mood_badge['display']
+        feedback['detected_mood_label'] = mood_badge['label']
+        feedback['title'] = 'Care chat ended'
+        _store_wellness_feedback(feedback)
+        _log_activity_entry(
+            current_user.id,
+            'care',
+            'Care chat summary',
+            summary_payload.get('summary') or 'A caring AI chat was completed.',
+            impacts=feedback.get('metrics'),
+        )
+        db.session.commit()
+        return jsonify(
+            {
+                'ended': True,
+                'updated': True,
+                'summary': summary_payload.get('summary'),
+                'detected_mood': mood_badge['display'],
+                'wellness_feedback': feedback,
+                'wellness_scores': _serialize_wellness(current_user),
+            }
+        )
+
     @app.route('/sleep/status')
     @login_required
     def sleep_status():
@@ -1748,15 +2318,18 @@ def register_routes(app):
     @login_required
     def hydration_status():
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
+        db.session.commit()
         morning_prompt_record = HydrationPrompt.query.filter(
             HydrationPrompt.user_id == current_user.id,
             HydrationPrompt.prompt_type == 'morning',
+            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
             db.func.date(HydrationPrompt.due_at) == local_today(),
-        ).first()
+        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
         return jsonify(
             {
                 'due_prompt': _serialize_prompt(due_prompt),
                 'upcoming_prompt': _serialize_prompt(upcoming_prompt),
+                'morning_prompt': _serialize_prompt(morning_prompt_record),
                 'morning_prompt_exists': bool(morning_prompt_record),
             }
         )
@@ -1766,28 +2339,31 @@ def register_routes(app):
     def hydration_respond():
         data = request.get_json(silent=True) or request.form
         prompt_id = data.get('prompt_id')
-        prompt_type = (data.get('prompt_type') or 'meal_now').strip().lower()
-        action = (data.get('action') or data.get('response_status') or '').strip().lower()
-        beverage = (data.get('beverage') or 'water').strip()
-        custom_beverage = (data.get('custom_beverage') or '').strip()
-        amount_text = (data.get('amount_text') or '').strip()
+        prompt_type = _clean_text(data.get('prompt_type') or 'meal_now', 30).lower()
+        action = _clean_text(data.get('action') or data.get('response_status') or '', 20).lower()
+        beverage = _clean_text(data.get('beverage') or 'water', 60)
+        custom_beverage = _clean_text(data.get('custom_beverage'), 120)
+        amount_text = _clean_text(data.get('amount_text'), 80)
 
         prompt = None
         if prompt_id:
-            prompt = HydrationPrompt.query.filter_by(id=int(prompt_id), user_id=current_user.id).first()
-        else:
-            prompt = HydrationPrompt(
-                user_id=current_user.id,
-                prompt_type='planned_hydration',
-                due_at=local_now().replace(tzinfo=None),
-                message='Goal-based hydration reminder.',
-                response_status='pending',
-            )
-            db.session.add(prompt)
-            db.session.flush()
+            try:
+                prompt = HydrationPrompt.query.filter_by(id=int(prompt_id), user_id=current_user.id).first()
+            except (TypeError, ValueError):
+                prompt = None
+
+        if not prompt:
+            due_prompt, _ = _get_due_and_upcoming_prompt(current_user.id)
+            if due_prompt:
+                prompt = due_prompt
 
         if not prompt:
             return jsonify({'message': 'Prompt not found.'}), 404
+
+        if action not in {'finished', 'done', 'not_yet', 'skipped', 'dismissed'}:
+            return jsonify({'message': 'Unknown hydration action.'}), 400
+        if beverage.strip().lower() == 'other' and not custom_beverage:
+            return jsonify({'message': 'Please type your drink name when you choose Other.'}), 400
 
         normalized_beverage = _normalize_beverage(beverage, custom_beverage)
         prompt.beverage = normalized_beverage
@@ -1833,7 +2409,6 @@ def register_routes(app):
             message = 'No problem. The reminder was skipped.'
 
         db.session.commit()
-        _consume_wellness_feedback()
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
         return jsonify(
             {

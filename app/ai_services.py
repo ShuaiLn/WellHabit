@@ -34,8 +34,16 @@ BASE_UNIT_ML = {
     'glasses': 250,
     'cup': 240,
     'cups': 240,
+    'mug': 320,
+    'mugs': 320,
+    'small bottle': 330,
+    'small bottles': 330,
     'bottle': 500,
     'bottles': 500,
+    'large bottle': 750,
+    'large bottles': 750,
+    'thermos': 750,
+    'thermoses': 750,
     'can': 330,
     'cans': 330,
 }
@@ -52,6 +60,21 @@ STRESS_WORDS = {
     'stress', 'stressed', 'panic', 'deadline', 'overwhelmed', 'anxiety', 'worry',
     '压力', '焦虑', '担心', '紧张', '崩溃'
 }
+CARE_HIGH_DISTRESS_WORDS = {
+    'panic attack', "can't breathe", 'cannot breathe', 'breaking down', 'spiraling', 'unsafe',
+    'hopeless', 'falling apart', 'losing control', '崩溃', '喘不过气', '不安全', '绝望'
+}
+CARE_LOW_ENERGY_WORDS = {
+    'tired', 'exhausted', 'drained', 'burned out', 'sleepy', 'worn out', '累', '疲劳', '没力气'
+}
+CARE_POSITIVE_WORDS = {
+    'happy', 'relieved', 'better', 'calmer', 'hopeful', 'grateful', 'lighter', 'proud',
+    '开心', '放心', '好多了', '平静', '有希望'
+}
+CARE_GROUNDING_WORDS = {
+    'breathe', 'breathing', 'grounded', 'grounding', 'pause', 'slow down', 'walk', 'water',
+    '呼吸', '冷静', '停一下', '喝水'
+}
 STRETCH_WORDS = {
     'stretch', 'stretching', 'yoga', 'mobility', '拉伸', '瑜伽'
 }
@@ -63,6 +86,151 @@ QUALITY_SCORES = {
     'excellent': 95,
 }
 
+MOOD_VALUE_MAP = {
+    'happy': 84,
+    'normal': 56,
+    'sad': 24,
+    'anxious': 28,
+    'exhausted': 34,
+    'stressed': 30,
+    'calm': 72,
+    'overwhelmed': 22,
+    'hopeful': 74,
+    'mixed': 50,
+}
+
+MOOD_DISPLAY_MAP = {
+    'happy': 'Happy',
+    'normal': 'Normal',
+    'sad': 'Sad',
+    'anxious': 'Anxious',
+    'exhausted': 'Exhausted',
+    'stressed': 'Stressed',
+    'calm': 'Calm',
+    'overwhelmed': 'Overwhelmed',
+    'hopeful': 'Hopeful',
+    'mixed': 'Mixed',
+    'custom': 'Custom',
+}
+
+
+
+
+def _normalize_mood_key(value: str | None) -> str:
+    raw = (value or '').strip().lower()
+    aliases = {
+        '开心': 'happy',
+        '普通': 'normal',
+        '伤心': 'sad',
+        '焦虑': 'anxious',
+        '疲劳': 'exhausted',
+        '累': 'exhausted',
+        '平静': 'calm',
+        '希望': 'hopeful',
+        'custom': 'custom',
+        'other': 'custom',
+    }
+    return aliases.get(raw, raw)
+
+
+def mood_display_label(mood_label: str | None, custom_text: str | None = None) -> str:
+    key = _normalize_mood_key(mood_label)
+    if key == 'custom' and (custom_text or '').strip():
+        return (custom_text or '').strip()[:60]
+    return MOOD_DISPLAY_MAP.get(key, (custom_text or '').strip()[:60] or 'Normal')
+
+
+def mood_value_for_label(mood_label: str | None, custom_text: str | None = None) -> int:
+    key = _normalize_mood_key(mood_label)
+    if key in MOOD_VALUE_MAP:
+        return MOOD_VALUE_MAP[key]
+
+    sample = f"{mood_label or ''} {custom_text or ''}".lower()
+    if any(word in sample for word in ['happy', '开心', 'relieved', 'hopeful', 'calm', 'good', 'better', 'light']):
+        return MOOD_VALUE_MAP['happy']
+    if any(word in sample for word in ['sad', '伤心', 'down', 'low', 'cry', '糟糕']):
+        return MOOD_VALUE_MAP['sad']
+    if any(word in sample for word in ['anxious', '焦虑', 'panic', 'stress', 'overwhelmed', '紧张']):
+        return MOOD_VALUE_MAP['anxious']
+    if any(word in sample for word in ['tired', '疲劳', 'exhausted', 'drained', 'burned out', '累']):
+        return MOOD_VALUE_MAP['exhausted']
+    return MOOD_VALUE_MAP['normal']
+
+
+def _fallback_detect_mood(text: str, preferred: str | None = None) -> dict[str, Any]:
+    preferred_key = _normalize_mood_key(preferred)
+    if preferred_key in MOOD_VALUE_MAP:
+        return {
+            'mood_label': preferred_key,
+            'mood_value': mood_value_for_label(preferred_key),
+            'display_label': mood_display_label(preferred_key),
+            'source': 'preferred',
+        }
+
+    sample = (text or '').strip()
+    lowered = sample.lower()
+    checks = [
+        ('overwhelmed', ['overwhelmed', 'spiraling', 'falling apart', '崩溃']),
+        ('anxious', ['anxious', 'anxiety', 'panic', '焦虑', '紧张', '担心']),
+        ('exhausted', ['exhausted', 'tired', 'drained', 'burned out', '疲劳', '累', '没力气']),
+        ('happy', ['happy', 'glad', 'grateful', '开心', '高兴', '轻松', 'proud', 'better']),
+        ('calm', ['calm', 'steady', 'grounded', 'relieved', '平静', '冷静']),
+        ('sad', ['sad', 'down', 'hurt', '难过', '伤心']),
+        ('stressed', ['stress', 'stressed', 'deadline', '压力']),
+        ('hopeful', ['hopeful', 'hope', '有希望']),
+    ]
+    for key, words in checks:
+        if any(word in lowered or word in sample for word in words):
+            return {
+                'mood_label': key,
+                'mood_value': mood_value_for_label(key),
+                'display_label': mood_display_label(key),
+                'source': 'fallback',
+            }
+
+    return {
+        'mood_label': 'normal',
+        'mood_value': mood_value_for_label('normal'),
+        'display_label': mood_display_label('normal'),
+        'source': 'fallback',
+    }
+
+
+def analyze_text_mood(text: str, preferred: str | None = None) -> dict[str, Any]:
+    cleaned = (text or '').strip()
+    client = _get_openai_client()
+    if not client:
+        return _fallback_detect_mood(cleaned, preferred=preferred)
+
+    try:
+        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
+        response = client.responses.create(
+            model=model_name,
+            input=(
+                'Classify the main mood in this short wellness text. '
+                'Return ONLY valid JSON with mood_label, mood_value, and display_label. '
+                'mood_label must be one of happy, normal, sad, anxious, exhausted, stressed, calm, overwhelmed, hopeful, mixed. '
+                'mood_value must be an integer from 0 to 100. '
+                f'Preferred hint: {preferred or "none"}. '
+                f'Text: {cleaned}'
+            ),
+        )
+        raw_text = (response.output_text or '').strip()
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        payload = json.loads(match.group(0) if match else raw_text)
+        mood_label = _normalize_mood_key(payload.get('mood_label'))
+        if mood_label not in MOOD_VALUE_MAP and mood_label != 'mixed':
+            raise ValueError('Invalid mood label')
+        display_label = str(payload.get('display_label') or mood_display_label(mood_label)).strip()[:60]
+        mood_value = _clamp_score(float(payload.get('mood_value') or mood_value_for_label(mood_label)))
+        return {
+            'mood_label': mood_label,
+            'mood_value': mood_value,
+            'display_label': display_label or mood_display_label(mood_label),
+            'source': 'ai',
+        }
+    except Exception:
+        return _fallback_detect_mood(cleaned, preferred=preferred)
 
 def _format_clock(hours_float: float) -> str:
     total_minutes = int(round(hours_float * 60)) % (24 * 60)
@@ -244,19 +412,24 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
             'reason': 'Used the numeric ml value directly.',
         }
 
-    normalized = cleaned_amount
+    normalized = cleaned_amount.replace('half', '0.5').replace('quarter', '0.25').replace('1/2', '0.5').replace('1/4', '0.25')
     for word, number in WORD_NUMBER_MAP.items():
         normalized = re.sub(rf'\b{word}\b', str(number), normalized)
 
-    unit_match = re.search(r'(\d+(?:\.\d+)?)?\s*(glass|glasses|cup|cups|bottle|bottles|can|cans)\b', normalized)
-    if unit_match:
-        count = float(unit_match.group(1) or 1)
-        unit = unit_match.group(2)
-        return {
-            'amount_ml': max(0, int(count * BASE_UNIT_ML[unit])),
-            'source': 'heuristic_unit',
-            'reason': f'Converted {count:g} {unit} into ml.',
-        }
+    compound_patterns = [
+        (r'(\d+(?:\.\d+)?)\s*(small bottle|small bottles|large bottle|large bottles|thermos|thermoses)\b', 'compound_unit'),
+        (r'(\d+(?:\.\d+)?)?\s*(glass|glasses|cup|cups|mug|mugs|bottle|bottles|can|cans)\b', 'heuristic_unit'),
+    ]
+    for regex, source in compound_patterns:
+        unit_match = re.search(regex, normalized)
+        if unit_match:
+            count = float(unit_match.group(1) or 1)
+            unit = unit_match.group(2)
+            return {
+                'amount_ml': max(0, int(count * BASE_UNIT_ML[unit])),
+                'source': source,
+                'reason': f'Converted {count:g} {unit} into ml.',
+            }
 
     plain_number = re.fullmatch(r'(\d+(?:\.\d+)?)', normalized)
     if plain_number:
@@ -301,6 +474,267 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
 
 
 
+
+def _care_text_flags(text: str) -> dict[str, Any]:
+    lowered = (text or '').lower()
+    return {
+        'high_distress': any(word in lowered or word in text for word in CARE_HIGH_DISTRESS_WORDS),
+        'low_energy': any(word in lowered or word in text for word in CARE_LOW_ENERGY_WORDS),
+        'positive': any(word in lowered or word in text for word in CARE_POSITIVE_WORDS),
+        'stress': any(word in lowered or word in text for word in STRESS_WORDS),
+        'grounding': any(word in lowered or word in text for word in CARE_GROUNDING_WORDS),
+    }
+
+
+
+def _care_micro_action(wellness_scores: dict[str, Any] | None, flags: dict[str, Any]) -> str:
+    scores = wellness_scores or {}
+    hydration = int(scores.get('hydration') or scores.get('hydration_score') or 50)
+    energy = int(scores.get('energy') or scores.get('energy_score') or 50)
+    focus = int(scores.get('focus') or scores.get('focus_score') or 50)
+    mood = int(scores.get('mood') or scores.get('mood_score') or 50)
+
+    if flags.get('high_distress'):
+        return 'Please put both feet on the floor, unclench your jaw, and take one slow breath in and one longer breath out.'
+    if hydration <= min(energy, focus, mood):
+        return 'Take a few sips of water now, then notice whether your body feels even 1% more settled.'
+    if energy <= min(hydration, focus, mood):
+        return 'Give yourself a 60-second pause: relax your shoulders, rest your eyes, and let your body soften a little.'
+    if focus <= min(hydration, energy, mood):
+        return 'Pick one tiny next step that takes under 3 minutes, and only do that one thing.'
+    if flags.get('positive'):
+        return 'Stay with this good moment for a few seconds and name one thing that helped you feel this way.'
+    return 'Take one slow breath, loosen your shoulders, and choose one gentle next step instead of trying to solve everything at once.'
+
+
+
+def _fallback_care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+    transcript = '\n'.join(f"{(item.get('role') or 'user')}: {(item.get('content') or '').strip()}" for item in messages[-10:])
+    last_user = next((item for item in reversed(messages) if (item.get('role') or '').lower() == 'user' and (item.get('content') or '').strip()), {})
+    user_text = (last_user.get('content') or '').strip()
+    flags = _care_text_flags(f"{transcript}\n{user_text}")
+    action = _care_micro_action(wellness_scores, flags)
+
+    if flags['high_distress']:
+        reply = (
+            "That sounds really intense, and I’m glad you said it out loud. "
+            "I want to stay gentle and practical here: "
+            f"{action} "
+            "If you feel unsafe or close to panicking, please reach out to a trusted person or local emergency support now, because AI text alone may not be enough in that moment."
+        )
+        risk = 'high'
+    elif flags['stress'] or flags['low_energy']:
+        reply = (
+            "I’m sorry this feels heavy right now. You do not need to fix everything at once. "
+            f"{action} "
+            "After that, tell me whether you want comfort, help sorting the problem, or a tiny plan for the next hour."
+        )
+        risk = 'medium'
+    elif flags['positive']:
+        reply = (
+            "I’m really glad this feels a little lighter right now. "
+            f"{action} "
+            "If you want, tell me what went right so we can help you hold onto it."
+        )
+        risk = 'low'
+    else:
+        reply = (
+            "I’m here with you. "
+            f"{action} "
+            "Tell me what feels most true right now: tired, anxious, frustrated, relieved, or something else."
+        )
+        risk = 'low'
+
+    return {
+        'reply': reply,
+        'risk_level': risk,
+        'source': 'fallback',
+    }
+def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+    cleaned_messages = []
+    for item in messages or []:
+        role = (item.get('role') or '').strip().lower()
+        content = (item.get('content') or '').strip()
+        if role not in {'user', 'assistant'} or not content:
+            continue
+        cleaned_messages.append({'role': role, 'content': content[:1200]})
+
+    if not cleaned_messages:
+        return _fallback_care_chat_reply([], wellness_scores)
+
+    client = _get_openai_client()
+    if not client:
+        return _fallback_care_chat_reply(cleaned_messages, wellness_scores)
+
+    try:
+        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
+        prompt = {
+            'task': 'Respond as a caring wellness support chat inside a student habit app.',
+            'rules': [
+                'Return ONLY valid JSON.',
+                'Sound warm, human, and grounded, not robotic or overly formal.',
+                'Keep the reply supportive but practical, usually 3 to 6 sentences.',
+                'Use the wellness scores as quiet context. Mention them only when naturally helpful.',
+                'Validate the feeling first, then offer one small concrete next step.',
+                'Do not pretend to replace a close friend, therapist, doctor, or emergency help.',
+                'If the user sounds intensely distressed, unsafe, or close to panic, say clearly that AI text may not be enough and encourage reaching a trusted person or local emergency support now.',
+                'Avoid empty praise and avoid repeating the same sentence patterns.',
+            ],
+            'wellness_scores': wellness_scores or {},
+            'recent_messages': cleaned_messages[-10:],
+            'output_schema': {
+                'reply': 'string',
+                'risk_level': 'low | medium | high',
+            },
+        }
+        response = client.responses.create(model=model_name, input=json.dumps(prompt, ensure_ascii=False))
+        raw_text = (response.output_text or '').strip()
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        payload = json.loads(match.group(0) if match else raw_text)
+        reply = str(payload.get('reply') or '').strip()
+        risk_level = str(payload.get('risk_level') or 'low').strip().lower()
+        if not reply:
+            raise ValueError('Empty reply')
+        if risk_level not in {'low', 'medium', 'high'}:
+            risk_level = 'low'
+        return {
+            'reply': reply,
+            'risk_level': risk_level,
+            'source': 'ai',
+        }
+    except Exception:
+        return _fallback_care_chat_reply(cleaned_messages, wellness_scores)
+
+def _care_topic_summary(messages: list[dict[str, str]]) -> str:
+    user_lines = [re.sub(r'\s+', ' ', (item.get('content') or '').strip()) for item in messages if (item.get('role') or '').lower() == 'user' and (item.get('content') or '').strip()]
+    if not user_lines:
+        return 'No specific feeling, event, or problem was shared in the chat yet.'
+
+    combined = ' '.join(user_lines)
+    first_sentence = re.split(r'(?<=[.!?])\s+', combined, maxsplit=1)[0].strip()
+    topic = (first_sentence or combined)[:150].rstrip(' ,.;:')
+    lowered = combined.lower()
+
+    if any(word in lowered for word in ['school', 'study', 'homework', 'exam', 'class']):
+        prefix = 'The user mainly talked about school or study pressure'
+    elif any(word in lowered for word in ['sleep', 'tired', 'exhausted', 'drained']):
+        prefix = 'The user mainly talked about tiredness or low energy'
+    elif any(word in lowered for word in ['anxious', 'anxiety', 'panic', 'overwhelmed', 'stress', 'stressed']):
+        prefix = 'The user mainly talked about anxiety, stress, or feeling overwhelmed'
+    elif any(word in lowered for word in ['happy', 'good', 'better', 'calm', 'grateful', 'excited']):
+        prefix = 'The user mainly talked about feeling better, calmer, or more positive'
+    else:
+        prefix = 'The user mainly talked about what they were feeling or processing'
+
+    if len(topic) > 110:
+        topic = topic[:110].rstrip(' ,.;:') + '…'
+    return f"{prefix}: {topic}."
+
+def _fallback_care_chat_summary(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+    transcript = '\n'.join((item.get('content') or '').strip() for item in messages[-12:])
+    user_messages = ' '.join((item.get('content') or '').strip() for item in messages if (item.get('role') or '').lower() == 'user')
+    flags = _care_text_flags(f"{transcript}\n{user_messages}")
+
+    feelings = []
+    lowered = user_messages.lower()
+    if 'anxious' in lowered or '焦虑' in user_messages or flags['stress']:
+        feelings.append('anxious')
+    if 'tired' in lowered or 'exhausted' in lowered or '疲劳' in user_messages or flags['low_energy']:
+        feelings.append('exhausted')
+    if 'happy' in lowered or '开心' in user_messages or flags['positive']:
+        feelings.append('happy')
+    if not feelings:
+        feelings.append('emotionally open')
+
+    feeling_text = ', '.join(feelings[:2])
+    mood_info = _fallback_detect_mood(user_messages, preferred=feelings[0] if feelings else None)
+    topic_summary = _care_topic_summary(messages)
+
+    if flags['high_distress']:
+        summary = f"{topic_summary} The emotional tone stayed intense across the chat."
+        latest_event = f"Care chat ended: user felt {feeling_text} and still distressed after the conversation"
+    elif flags['positive'] and not flags['stress']:
+        summary = f"{topic_summary} The chat ended on a steadier or more positive note."
+        latest_event = f"Care chat ended: user felt {feeling_text} and more grounded after the conversation"
+    else:
+        summary = f"{topic_summary} The chat ended a little calmer than it started."
+        latest_event = f"Care chat ended: user felt {feeling_text} and slightly calmer after the conversation"
+
+    return {
+        'summary': summary,
+        'latest_event': latest_event,
+        'detected_mood': mood_info['mood_label'],
+        'detected_mood_display': mood_info['display_label'],
+        'mood_value': mood_info['mood_value'],
+        'source': 'fallback',
+    }
+
+def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+    cleaned_messages = []
+    for item in messages or []:
+        role = (item.get('role') or '').strip().lower()
+        content = (item.get('content') or '').strip()
+        if role not in {'user', 'assistant'} or not content:
+            continue
+        cleaned_messages.append({'role': role, 'content': content[:1200]})
+
+    if not cleaned_messages:
+        return {
+            'summary': 'The care chat was opened but ended before any real conversation was saved.',
+            'latest_event': 'Care chat ended without a saved conversation',
+            'source': 'fallback',
+        }
+
+    client = _get_openai_client()
+    if not client:
+        return _fallback_care_chat_summary(cleaned_messages, wellness_scores)
+
+    try:
+        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
+        prompt = {
+            'task': 'Summarize a finished care chat for a habit app history feed and provide a short event line that helps wellness scoring.',
+            'rules': [
+                'Return ONLY valid JSON.',
+                'The summary should be 1 or 2 short sentences and should sound specific, not generic.',
+                'Focus the summary almost entirely on what the user talked about, felt, or was processing in the chat. Avoid generic phrases like supportive check-in unless the content really says that.',
+                'The latest_event should be short and mention the emotional state before and after the chat when possible.',
+                'Use phrases like anxious, tired, calmer, grounded, relieved, hopeful, overwhelmed only when supported by the chat.',
+                'Do not invent medical claims or dramatic details.',
+                'Also classify the main mood of the chat.',
+            ],
+            'wellness_scores': wellness_scores or {},
+            'recent_messages': cleaned_messages[-12:],
+            'output_schema': {
+                'summary': 'string',
+                'latest_event': 'string',
+                'detected_mood': 'happy | normal | sad | anxious | exhausted | stressed | calm | overwhelmed | hopeful | mixed',
+                'detected_mood_display': 'string',
+                'mood_value': 'integer 0-100',
+            },
+        }
+        response = client.responses.create(model=model_name, input=json.dumps(prompt, ensure_ascii=False))
+        raw_text = (response.output_text or '').strip()
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        payload = json.loads(match.group(0) if match else raw_text)
+        summary = str(payload.get('summary') or '').strip()
+        latest_event = str(payload.get('latest_event') or '').strip()
+        detected_mood = _normalize_mood_key(payload.get('detected_mood'))
+        if not summary or not latest_event:
+            raise ValueError('Missing summary fields')
+        if detected_mood not in MOOD_VALUE_MAP and detected_mood != 'mixed':
+            detected_mood = _fallback_detect_mood(' '.join(item['content'] for item in cleaned_messages if item['role'] == 'user')).get('mood_label', 'normal')
+        detected_mood_display = str(payload.get('detected_mood_display') or mood_display_label(detected_mood)).strip()[:60]
+        mood_value = _clamp_score(float(payload.get('mood_value') or mood_value_for_label(detected_mood)))
+        return {
+            'summary': summary,
+            'latest_event': latest_event,
+            'detected_mood': detected_mood,
+            'detected_mood_display': detected_mood_display or mood_display_label(detected_mood),
+            'mood_value': mood_value,
+            'source': 'ai',
+        }
+    except Exception:
+        return _fallback_care_chat_summary(cleaned_messages, wellness_scores)
 def _event_bumps(latest_event: str) -> dict[str, int]:
     text = (latest_event or '').lower()
     bumps = {
@@ -337,6 +771,18 @@ def _event_bumps(latest_event: str) -> dict[str, int]:
     if any(word in text for word in ['tired', 'anxious', 'sad', 'stress', 'stressed', 'burned out']):
         bumps['mood_score'] -= 4
 
+    if 'care chat' in text or 'supportive chat' in text or 'support chat' in text:
+        if any(word in text for word in ['calmer', 'grounded', 'relieved', 'better', 'hopeful', 'reassured', 'steadier']):
+            bumps['mood_score'] += 4
+            bumps['focus_score'] += 2
+        if any(word in text for word in ['still distressed', 'still anxious', 'still overwhelmed', 'panicked', 'unsafe', 'hopeless', 'spiraling']):
+            bumps['mood_score'] -= 5
+            bumps['focus_score'] -= 2
+        if any(word in text for word in ['exhausted', 'drained', 'worn out', 'burned out']):
+            bumps['energy_score'] -= 2
+        if any(word in text for word in ['water', 'hydration', 'drink']) and any(word in text for word in ['grounded', 'calmer', 'better']):
+            bumps['hydration_score'] += 2
+
     return bumps
 
 
@@ -369,6 +815,8 @@ def _fallback_wellness_scores(
     steps = max(0, int(daily_log.get('steps') or 0))
     exercise_minutes = max(0, int(daily_log.get('exercise_minutes') or 0))
     journal_text = ' '.join(str(daily_log.get(key) or '') for key in ['journal_text', 'activity_text', 'notes']).strip()
+    mood_label = str(daily_log.get('mood_label') or '')
+    mood_custom_text = str(daily_log.get('mood_custom_text') or '')
     lowered_text = journal_text.lower()
 
     hydration_anchor = _clamp_score(35 + min(water_ml / water_goal, 1.4) * 40)
@@ -390,6 +838,9 @@ def _fallback_wellness_scores(
     negative_hits = sum(1 for word in NEGATIVE_WORDS if word in lowered_text or word in journal_text)
     stress_hits = sum(1 for word in STRESS_WORDS if word in lowered_text or word in journal_text)
     mood_anchor = _clamp_score(50 + positive_hits * 6 - negative_hits * 7 - stress_hits * 6 + (4 if journal_text else 0))
+    if mood_label or mood_custom_text:
+        manual_mood_value = mood_value_for_label(mood_label, mood_custom_text)
+        mood_anchor = _clamp_score((mood_anchor * 0.55) + (manual_mood_value * 0.45))
 
     bumps = _event_bumps(latest_event)
 

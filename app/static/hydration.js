@@ -22,7 +22,7 @@
     let pendingRequest = false;
 
     function persistActivePrompt(prompt) {
-        if (!prompt) {
+        if (!prompt || !prompt.id) {
             localStorage.removeItem(STORAGE_KEY);
             return;
         }
@@ -33,8 +33,14 @@
         try {
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return null;
-            return JSON.parse(raw);
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.id) {
+                localStorage.removeItem(STORAGE_KEY);
+                return null;
+            }
+            return parsed;
         } catch (error) {
+            localStorage.removeItem(STORAGE_KEY);
             return null;
         }
     }
@@ -71,24 +77,25 @@
     }
 
     function openPrompt(prompt, fallbackType) {
+        if (!prompt || !prompt.id) {
+            closePrompt();
+            refreshPromptState();
+            return;
+        }
+
         if (hydrationPaused()) {
             persistActivePrompt(prompt);
             scheduleUpcoming({ due_at_iso: new Date(getPauseUntil() + 250).toISOString() });
             return;
         }
 
-        activePrompt = prompt || {
-            id: null,
-            prompt_type: fallbackType || 'morning',
-            message: 'Drink a glass of water to begin the day.',
-            beverage: 'water'
-        };
+        activePrompt = prompt;
 
         eyebrowEl.textContent = 'Hydration Reminder';
         titleEl.textContent = 'Better to drink a glass of water.';
         messageEl.textContent = activePrompt.message || 'Choose what you want to drink, type an amount, then tell WellHabit if you finished it.';
         beverageEl.value = ['water', 'milk', 'coke', 'other'].includes(activePrompt.beverage) ? activePrompt.beverage : 'water';
-        amountEl.value = amountEl.value.trim() ? amountEl.value : '';
+        amountEl.value = '';
         customEl.value = activePrompt.custom_beverage || '';
         toggleCustomInput();
         setDefaultAmount(activePrompt.prompt_type);
@@ -122,9 +129,10 @@
             if (!response.ok) return;
 
             config.morningPromptExists = body.morning_prompt_exists;
+            config.morningPrompt = body.morning_prompt;
             config.upcoming = body.upcoming_prompt;
 
-            if (body.due_prompt) {
+            if (body.due_prompt && body.due_prompt.id) {
                 openPrompt(body.due_prompt, body.due_prompt.prompt_type);
             } else if (!document.hidden) {
                 if (!pendingRequest) {
@@ -142,6 +150,11 @@
 
     async function sendResponse(status) {
         if (!activePrompt || pendingRequest) return;
+        if (!activePrompt.id) {
+            closePrompt();
+            await refreshPromptState();
+            return;
+        }
 
         if (beverageEl.value === 'other' && !customEl.value.trim()) {
             customEl.focus();
@@ -167,6 +180,11 @@
 
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
+                if (body.message === 'Prompt not found.') {
+                    closePrompt();
+                    await refreshPromptState();
+                    return;
+                }
                 if (body.message) {
                     alert(body.message);
                 }
@@ -175,15 +193,9 @@
 
             amountEl.value = '';
             customEl.value = '';
-            if (body.due_prompt) {
-                openPrompt(body.due_prompt, body.due_prompt.prompt_type);
-            } else {
-                closePrompt();
-            }
-            if (body.wellness_feedback && window.WellHabitShowWellnessFeedback) {
-                window.WellHabitShowWellnessFeedback(body.wellness_feedback);
-            }
-            scheduleUpcoming(body.upcoming_prompt);
+            closePrompt();
+            window.location.reload();
+            return;
         } catch (error) {
             console.error('Hydration response failed', error);
             alert('Saving the hydration response failed. Please try again.');
@@ -198,7 +210,7 @@
     };
 
     window.WellHabitHydrationOpenPrompt = function (prompt) {
-        if (prompt) {
+        if (prompt && prompt.id) {
             openPrompt(prompt, prompt.prompt_type || 'planned_hydration');
         }
     };

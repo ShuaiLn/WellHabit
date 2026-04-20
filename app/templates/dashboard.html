@@ -132,13 +132,20 @@
             </div>
             <a class="link-btn" href="{{ url_for('history_view') }}">Open All</a>
         </div>
-        <div class="history-list">
+        <div class="history-list history-preview-list">
             {% for entry in recent_activity_entries %}
-                <div class="history-item">
-                    <strong>{{ entry.title }}</strong>
-                    <span>{{ entry.event_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                <article class="history-item history-preview-item">
+                    <div class="history-preview-head">
+                        <strong>{{ entry.title }}</strong>
+                        <span class="muted small">{{ entry.event_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
                     {% if entry.description %}<p>{{ entry.description }}</p>{% endif %}
-                </div>
+                    <div class="history-chip-row">
+                        {% for impact in entry.impacts %}
+                            <span class="history-impact-chip metric-{{ impact.key }} {% if impact.value > 0 %}plus{% elif impact.value < 0 %}minus{% else %}zero{% endif %}">{{ impact.label }} {{ impact.signed }}</span>
+                        {% endfor %}
+                    </div>
+                </article>
             {% else %}
                 <p class="muted">No activity yet.</p>
             {% endfor %}
@@ -176,13 +183,18 @@
 
 {% block scripts %}
 <script>
-window.WELLHABIT_PROMPTS = {
+window.WELLHABIT_PROMPTS = Object.assign(window.WELLHABIT_PROMPTS || {}, {
     due: {{ due_hydration_prompt|tojson }},
     upcoming: {{ upcoming_hydration_prompt|tojson }},
+    morningPrompt: {{ morning_hydration_prompt|tojson }},
     morningPromptExists: {{ morning_prompt_exists|tojson }},
     statusUrl: {{ url_for('hydration_status')|tojson }},
     sleepStatusUrl: {{ url_for('sleep_status')|tojson }}
-};
+});
+
+if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && window.WELLHABIT_PROMPTS.due.id) {
+    window.WellHabitHydrationOpenPrompt(window.WELLHABIT_PROMPTS.due);
+}
 
 const timerDisplay = document.getElementById('timer-display');
 const timerMode = document.getElementById('timer-mode');

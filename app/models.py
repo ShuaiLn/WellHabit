@@ -39,6 +39,7 @@ class User(UserMixin, db.Model):
     pomodoro_sessions = db.relationship('PomodoroSession', backref='user', lazy=True, cascade='all, delete-orphan')
     hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy=True, cascade='all, delete-orphan')
     activity_entries = db.relationship('ActivityEntry', backref='user', lazy=True, cascade='all, delete-orphan')
+    mood_entries = db.relationship('MoodEntry', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -63,6 +64,8 @@ class DailyLog(db.Model):
     exercise_minutes = db.Column(db.Integer, nullable=False, default=0)
     notes = db.Column(db.Text)
     journal_text = db.Column(db.Text)
+    mood_label = db.Column(db.String(40))
+    mood_custom_text = db.Column(db.String(120))
     activity_text = db.Column(db.Text)
     ai_meal_detected = db.Column(db.Boolean, nullable=False, default=False)
     ai_meal_confidence = db.Column(db.String(20))
@@ -83,6 +86,7 @@ class Task(db.Model):
     completed = db.Column(db.Boolean, default=False, nullable=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     completed_at = db.Column(db.DateTime)
+    auto_tracked_water_ml = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -126,4 +130,17 @@ class ActivityEntry(db.Model):
     entry_type = db.Column(db.String(50), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
+    event_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class MoodEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    log_id = db.Column(db.Integer, db.ForeignKey('daily_log.id'))
+    source = db.Column(db.String(30), nullable=False, default='journal')
+    mood_label = db.Column(db.String(40), nullable=False)
+    mood_custom_text = db.Column(db.String(120))
+    mood_value = db.Column(db.Integer, nullable=False, default=50)
+    summary = db.Column(db.Text)
+    detected_by = db.Column(db.String(20), nullable=False, default='user')
     event_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)

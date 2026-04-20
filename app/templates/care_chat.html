@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}Care AI | WellHabit{% endblock %}
+{% block content %}
+<section class="page-header care-header">
+    <div>
+        <h1>Care AI Chat</h1>
+        <p class="muted">A gentle space to talk through exhaustion, anxiety, happiness, or stress. The AI replies with your current wellness scores in mind and updates them only when the chat ends.</p>
+    </div>
+    <div class="pill-group">
+        <span class="pill">Ends automatically when you leave this page</span>
+    </div>
+</section>
+
+<section class="care-layout-grid">
+    <aside class="card care-sidebar">
+        <p class="eyebrow">Current wellness context</p>
+        <div class="care-score-list">
+            {% for metric in wellness_metrics %}
+                <div class="care-score-row metric-{{ metric.key }}">
+                    <div>
+                        <strong>{{ metric.label }}</strong>
+                        <p class="muted small">{{ metric.subtitle }}</p>
+                    </div>
+                    <span class="care-score-value metric-{{ metric.key }}">{{ metric.value }}</span>
+                </div>
+            {% endfor %}
+        </div>
+
+
+    </aside>
+
+    <section class="card care-chat-card">
+        <div class="care-chat-window">
+            <div class="care-chat-topbar care-window-header">
+                <div class="care-window-title">
+                    <span class="care-window-avatar">AI</span>
+                    <div>
+                        <p class="eyebrow">Conversation</p>
+                        <h2>Talk it out here</h2>
+                        <p class="muted small">This chat is not saved forever. When it ends, WellHabit stores only a short summary in History and refreshes your scores.</p>
+                    </div>
+                </div>
+                <button class="btn secondary" type="button" id="care-end-btn">End chat</button>
+            </div>
+
+            <div class="care-messages-frame">
+                <div class="care-messages" id="care-messages"></div>
+            </div>
+
+            <div class="care-quick-strip">
+                <button class="btn secondary small-btn care-quick-btn" type="button" data-prompt="I feel exhausted and I do not know where to start.">I feel exhausted</button>
+                <button class="btn secondary small-btn care-quick-btn" type="button" data-prompt="I feel anxious and I need help calming down.">I feel anxious</button>
+                <button class="btn secondary small-btn care-quick-btn" type="button" data-prompt="I feel happy and I want to keep this feeling steady.">I feel happy</button>
+                <button class="btn secondary small-btn care-quick-btn" type="button" data-prompt="Please help me slow down and take one small next step.">Help me slow down</button>
+            </div>
+
+            <form class="care-input-wrap care-composer" id="care-form">
+                <label class="full-width care-composer-box">
+                    <span class="care-input-label">Your message</span>
+                    <textarea id="care-input" rows="4" placeholder="Start anywhere. You can talk about tiredness, anxiety, happiness, or stress. If you feel intensely panicked, unsafe, or completely overwhelmed, please reach out to a trusted person, counselor, or local emergency support."></textarea>
+                </label>
+                <div class="care-input-actions">
+                    <p class="muted small" id="care-status-line">The chat stays on this page only.</p>
+                    <button class="btn primary" type="submit" id="care-send-btn">Send</button>
+                </div>
+            </form>
+        </div>
+    </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.WELLHABIT_CARE = {
+    sessionId: {{ care_session_id|tojson }},
+    introMessage: {{ care_intro_message|tojson }},
+    messageUrl: {{ url_for('care_chat_message')|tojson }},
+    endUrl: {{ url_for('care_chat_end')|tojson }},
+    historyUrl: {{ url_for('history_view')|tojson }}
+};
+</script>
+<script src="{{ url_for('static', filename='care_chat.js') }}"></script>
+{% endblock %}

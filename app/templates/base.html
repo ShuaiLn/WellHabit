@@ -28,6 +28,7 @@
                         <a href="{{ url_for('dashboard') }}">Home</a>
                         <a href="{{ url_for('logs') }}">Daily Log</a>
                         <a href="{{ url_for('calendar_view') }}">Calendar</a>
+                        <a href="{{ url_for('care_chat_page') }}">Care AI</a>
                         <a href="{{ url_for('history_view') }}">History</a>
                         <a href="{{ url_for('profile') }}">Profile</a>
                         <a href="{{ url_for('logout') }}">Logout</a>
@@ -42,16 +43,25 @@
 
     {% if current_user.is_authenticated %}
     <div class="global-timer-widget" id="global-timer-widget" hidden>
-        <div class="global-timer-head">
-            <div>
-                <p class="global-timer-kicker">Tomato Clock</p>
-                <strong id="global-timer-mode">Focus</strong>
-            </div>
-            <a href="{{ url_for('dashboard') }}" class="global-timer-link">Open</a>
+        <button class="global-timer-mini-toggle" id="global-timer-mini-toggle" type="button" aria-expanded="true" title="Minimize timer">◔</button>
+        <div class="global-timer-mini-face" id="global-timer-mini-face" hidden>
+            <span class="global-timer-mini-label">🍅</span>
+            <strong id="global-timer-mini-time">25:00</strong>
         </div>
-        <div class="global-timer-time" id="global-timer-time">25:00</div>
-        <div class="global-timer-activity" id="global-timer-activity">work</div>
-        <p class="global-timer-status" id="global-timer-status">Running</p>
+        <div class="global-timer-full" id="global-timer-full">
+            <div class="global-timer-head">
+                <div class="global-timer-drag-zone" id="global-timer-drag-zone">
+                    <p class="global-timer-kicker">Tomato Clock</p>
+                    <strong id="global-timer-mode">Focus</strong>
+                </div>
+            </div>
+            <div class="global-timer-time" id="global-timer-time">25:00</div>
+            <div class="global-timer-activity" id="global-timer-activity">work</div>
+            <p class="global-timer-status" id="global-timer-status">Running</p>
+            <div class="global-timer-footer">
+                <a href="{{ url_for('dashboard') }}" class="global-timer-link">Open</a>
+            </div>
+        </div>
     </div>
     {% endif %}
 
@@ -75,6 +85,13 @@
         <p class="eyebrow" id="wellness-feedback-eyebrow">AI Wellness Update</p>
         <h2 id="wellness-feedback-title">Scores updated</h2>
         <p class="muted" id="wellness-feedback-message">Your wellness scores were refreshed.</p>
+        <div class="wellness-feedback-mood" id="wellness-feedback-mood-wrap" hidden>
+            <span class="pill" id="wellness-feedback-mood-pill">Mood</span>
+        </div>
+        <div class="wellness-feedback-summary-box" id="wellness-feedback-summary-wrap" hidden>
+            <p class="eyebrow">Chat summary</p>
+            <p id="wellness-feedback-summary-text"></p>
+        </div>
         <div class="wellness-feedback-metrics" id="wellness-feedback-metrics"></div>
         <div class="modal-actions big-modal-actions">
             <button class="btn primary" type="button" id="wellness-feedback-ok-btn">Okay</button>
@@ -111,13 +128,12 @@
             const now = new Date();
             timeEl.textContent = now.toLocaleTimeString([], {
                 hour: 'numeric',
-                minute: '2-digit',
-                second: '2-digit'
+                minute: '2-digit'
             });
         }
 
         updateLocalTime();
-        setInterval(updateLocalTime, 1000);
+        setInterval(updateLocalTime, 15000);
     })();
 
     {% if current_user.is_authenticated %}
@@ -127,10 +143,20 @@
         const eyebrowEl = document.getElementById('wellness-feedback-eyebrow');
         const messageEl = document.getElementById('wellness-feedback-message');
         const metricsEl = document.getElementById('wellness-feedback-metrics');
+        const moodWrap = document.getElementById('wellness-feedback-mood-wrap');
+        const moodPill = document.getElementById('wellness-feedback-mood-pill');
+        const summaryWrap = document.getElementById('wellness-feedback-summary-wrap');
+        const summaryText = document.getElementById('wellness-feedback-summary-text');
         const okBtn = document.getElementById('wellness-feedback-ok-btn');
+
+        let reloadOnClose = false;
 
         function hide() {
             if (overlay) overlay.hidden = true;
+            if (reloadOnClose) {
+                reloadOnClose = false;
+                window.location.reload();
+            }
         }
 
         function renderMetrics(metrics) {
@@ -139,14 +165,15 @@
             (metrics || []).forEach((item) => {
                 const chip = document.createElement('span');
                 const toneClass = item.tone_class || (item.delta > 0 ? 'plus' : (item.delta < 0 ? 'minus' : 'zero'));
-                chip.className = `wellness-feedback-chip ${toneClass}`;
+                chip.className = `wellness-feedback-chip ${toneClass} metric-${item.key || 'overall'}`;
                 chip.textContent = `${item.label} ${item.signed || '+0'}`;
                 metricsEl.appendChild(chip);
             });
         }
 
-        function show(feedback) {
+        function show(feedback, options) {
             if (!overlay || !feedback) return;
+            reloadOnClose = Boolean(options && options.reloadOnClose);
             try {
                 sessionStorage.setItem('wellhabitHydrationPauseUntil', String(Date.now() + 15000));
             } catch (error) {
@@ -157,6 +184,18 @@
             eyebrowEl.textContent = tone === 'positive' ? 'AI Encouragement' : (tone === 'negative' ? 'AI Suggestion' : 'AI Wellness Update');
             titleEl.textContent = feedback.title || 'Scores updated';
             messageEl.textContent = feedback.message || 'Your wellness scores were refreshed.';
+            if (feedback.detected_mood) {
+                moodPill.textContent = `AI analyzed mood: ${feedback.detected_mood}`;
+                moodWrap.hidden = false;
+            } else {
+                moodWrap.hidden = true;
+            }
+            if (feedback.care_summary) {
+                summaryText.textContent = feedback.care_summary;
+                summaryWrap.hidden = false;
+            } else {
+                summaryWrap.hidden = true;
+            }
             renderMetrics(feedback.metrics || []);
             overlay.hidden = false;
         }
@@ -180,7 +219,13 @@
         const widgetTime = document.getElementById('global-timer-time');
         const widgetActivity = document.getElementById('global-timer-activity');
         const widgetStatus = document.getElementById('global-timer-status');
+        const widgetMiniToggle = document.getElementById('global-timer-mini-toggle');
+        const widgetMiniFace = document.getElementById('global-timer-mini-face');
+        const widgetMiniTime = document.getElementById('global-timer-mini-time');
+        const widgetFull = document.getElementById('global-timer-full');
+        const widgetDragZone = document.getElementById('global-timer-drag-zone');
         const STORAGE_KEY = 'wellhabitPomodoroState';
+        const WIDGET_UI_KEY = 'wellhabitPomodoroWidgetUI';
         const LOCK_PREFIX = 'wellhabitPomodoroSaved:';
         const SAVE_URL = {{ url_for('save_pomodoro')|tojson }};
         const listeners = [];
@@ -257,6 +302,57 @@
             return state.isRunning || state.mode !== 'focus' || state.cycleNumber !== 1 || getRemainingSeconds(state) !== baseline;
         }
 
+
+        function readWidgetUi() {
+            try {
+                const raw = localStorage.getItem(WIDGET_UI_KEY);
+                const parsed = raw ? JSON.parse(raw) : {};
+                return {
+                    minimized: Boolean(parsed && parsed.minimized),
+                    left: Number.isFinite(Number(parsed && parsed.left)) ? Number(parsed.left) : null,
+                    top: Number.isFinite(Number(parsed && parsed.top)) ? Number(parsed.top) : null,
+                };
+            } catch (error) {
+                return { minimized: false, left: null, top: null };
+            }
+        }
+
+        function writeWidgetUi(nextUi) {
+            const current = readWidgetUi();
+            const merged = Object.assign({}, current, nextUi || {});
+            localStorage.setItem(WIDGET_UI_KEY, JSON.stringify(merged));
+            return merged;
+        }
+
+        function applyWidgetUi() {
+            if (!widget) return;
+            const ui = readWidgetUi();
+            widget.classList.toggle('is-minimized', ui.minimized);
+            if (widgetMiniToggle) {
+                widgetMiniToggle.setAttribute('aria-expanded', ui.minimized ? 'false' : 'true');
+                widgetMiniToggle.title = ui.minimized ? 'Expand timer' : 'Minimize timer';
+            }
+            if (widgetMiniFace) widgetMiniFace.hidden = !ui.minimized;
+            if (widgetFull) widgetFull.hidden = ui.minimized;
+            if (ui.left !== null && ui.top !== null) {
+                widget.style.left = `${ui.left}px`;
+                widget.style.top = `${ui.top}px`;
+                widget.style.right = 'auto';
+                widget.style.bottom = 'auto';
+            }
+        }
+
+        function clampWidgetPosition(left, top) {
+            const width = widget ? widget.offsetWidth : 280;
+            const height = widget ? widget.offsetHeight : 100;
+            const maxLeft = Math.max(8, window.innerWidth - width - 8);
+            const maxTop = Math.max(8, window.innerHeight - height - 8);
+            return {
+                left: Math.min(Math.max(8, left), maxLeft),
+                top: Math.min(Math.max(8, top), maxTop),
+            };
+        }
+
         function renderWidget(state) {
             if (!widget) return;
             const remaining = getRemainingSeconds(state);
@@ -264,8 +360,10 @@
             widget.classList.toggle('is-running', state.isRunning);
             widgetMode.textContent = state.mode === 'focus' ? `Focus · Cycle ${state.cycleNumber}` : `Break · Cycle ${state.cycleNumber}`;
             widgetTime.textContent = formatSeconds(remaining);
+            if (widgetMiniTime) widgetMiniTime.textContent = formatSeconds(remaining);
             widgetActivity.textContent = state.activityLabel || 'work';
             widgetStatus.textContent = state.isRunning ? 'Running' : 'Paused';
+            applyWidgetUi();
         }
 
         async function saveFocusSession(state) {
@@ -336,6 +434,58 @@
             if (!state.isRunning) return;
             listeners.forEach((listener) => listener(readState()));
         }
+
+
+        widgetMiniToggle?.addEventListener('click', () => {
+            const ui = readWidgetUi();
+            writeWidgetUi({ minimized: !ui.minimized });
+            applyWidgetUi();
+        });
+
+        let dragState = null;
+
+        function beginDrag(event) {
+            if (!widget) return;
+            const point = event.touches ? event.touches[0] : event;
+            const rect = widget.getBoundingClientRect();
+            dragState = {
+                offsetX: point.clientX - rect.left,
+                offsetY: point.clientY - rect.top,
+            };
+            widget.classList.add('is-dragging');
+        }
+
+        function moveDrag(event) {
+            if (!dragState || !widget) return;
+            const point = event.touches ? event.touches[0] : event;
+            const position = clampWidgetPosition(point.clientX - dragState.offsetX, point.clientY - dragState.offsetY);
+            widget.style.left = `${position.left}px`;
+            widget.style.top = `${position.top}px`;
+            widget.style.right = 'auto';
+            widget.style.bottom = 'auto';
+            if (!event.touches) event.preventDefault();
+        }
+
+        function endDrag() {
+            if (!dragState || !widget) return;
+            dragState = null;
+            widget.classList.remove('is-dragging');
+            const rect = widget.getBoundingClientRect();
+            const position = clampWidgetPosition(rect.left, rect.top);
+            writeWidgetUi(position);
+            applyWidgetUi();
+        }
+
+        widgetDragZone?.addEventListener('mousedown', beginDrag);
+        widgetMiniFace?.addEventListener('mousedown', beginDrag);
+        window.addEventListener('mousemove', moveDrag);
+        window.addEventListener('mouseup', endDrag);
+        widgetDragZone?.addEventListener('touchstart', beginDrag, { passive: true });
+        widgetMiniFace?.addEventListener('touchstart', beginDrag, { passive: true });
+        window.addEventListener('touchmove', moveDrag, { passive: false });
+        window.addEventListener('touchend', endDrag);
+        window.addEventListener('resize', applyWidgetUi);
+        applyWidgetUi();
 
         window.WellHabitTimer = {
             getState() {

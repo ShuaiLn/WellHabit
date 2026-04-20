@@ -40,3 +40,11 @@ Optional custom model:
 ```powershell
 setx OPENAI_MODEL "gpt-5.4"
 ```
+
+
+For safer local configuration, you can also set a secret key and enable debug only when needed:
+
+```powershell
+setx FLASK_SECRET_KEY "your_long_random_secret"
+setx FLASK_DEBUG "1"
+```
