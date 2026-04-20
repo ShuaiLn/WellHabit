@@ -55,14 +55,20 @@ def run_lightweight_migrations(app: Flask) -> None:
             _ensure_column(cursor, 'user', 'daily_sleep_goal_hours', 'daily_sleep_goal_hours FLOAT NOT NULL DEFAULT 8.0')
             _ensure_column(cursor, 'user', 'daily_step_goal', 'daily_step_goal INTEGER NOT NULL DEFAULT 8000')
             _ensure_column(cursor, 'user', 'daily_exercise_goal_minutes', 'daily_exercise_goal_minutes INTEGER NOT NULL DEFAULT 30')
+            _ensure_column(cursor, 'user', 'goal_progress_intensity', "goal_progress_intensity VARCHAR(12) NOT NULL DEFAULT 'medium'")
             _ensure_column(cursor, 'user', 'optimal_bedtime', "optimal_bedtime VARCHAR(5)")
             _ensure_column(cursor, 'user', 'optimal_wake_time', "optimal_wake_time VARCHAR(5)")
+            _ensure_column(cursor, 'user', 'hydration_wake_time', "hydration_wake_time VARCHAR(5)")
+            _ensure_column(cursor, 'user', 'hydration_breakfast_time', "hydration_breakfast_time VARCHAR(5)")
+            _ensure_column(cursor, 'user', 'hydration_lunch_time', "hydration_lunch_time VARCHAR(5)")
+            _ensure_column(cursor, 'user', 'hydration_dinner_time', "hydration_dinner_time VARCHAR(5)")
             _ensure_column(cursor, 'user', 'hydration_score', 'hydration_score INTEGER NOT NULL DEFAULT 50')
             _ensure_column(cursor, 'user', 'energy_score', 'energy_score INTEGER NOT NULL DEFAULT 50')
             _ensure_column(cursor, 'user', 'fitness_score', 'fitness_score INTEGER NOT NULL DEFAULT 50')
             _ensure_column(cursor, 'user', 'focus_score', 'focus_score INTEGER NOT NULL DEFAULT 50')
             _ensure_column(cursor, 'user', 'mood_score', 'mood_score INTEGER NOT NULL DEFAULT 50')
             _ensure_column(cursor, 'user', 'overall_wellness_score', 'overall_wellness_score INTEGER NOT NULL DEFAULT 50')
+            _ensure_column(cursor, 'user', 'avatar_emoji', "avatar_emoji VARCHAR(16) NOT NULL DEFAULT '🙂'")
             _ensure_column(cursor, 'user', 'wellness_summary', 'wellness_summary TEXT')
             _ensure_column(cursor, 'user', 'wellness_updated_at', 'wellness_updated_at DATETIME')
 
@@ -173,6 +179,51 @@ def run_lightweight_migrations(app: Flask) -> None:
 
         if 'mood_entry' in tables:
             _ensure_index(cursor, 'ix_mood_entry_user_source_event_at', 'CREATE INDEX IF NOT EXISTS ix_mood_entry_user_source_event_at ON mood_entry (user_id, source, event_at)')
+
+        if 'eye_exercise_prompt' not in tables:
+            cursor.execute(
+                '''
+                CREATE TABLE eye_exercise_prompt (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    focus_minutes_trigger INTEGER NOT NULL DEFAULT 25,
+                    threshold_minutes INTEGER NOT NULL DEFAULT 25,
+                    video_url VARCHAR(300) NOT NULL DEFAULT 'https://www.youtube.com/watch?v=iVb4vUp70zY',
+                    response_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    due_at DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    responded_at DATETIME,
+                    FOREIGN KEY(user_id) REFERENCES user (id)
+                )
+                '''
+            )
+            cursor.execute('CREATE INDEX IF NOT EXISTS ix_eye_exercise_prompt_user_due ON eye_exercise_prompt (user_id, due_at)')
+
+        if 'eye_exercise_prompt' in tables:
+            _ensure_index(cursor, 'ix_eye_exercise_prompt_user_status_due', 'CREATE INDEX IF NOT EXISTS ix_eye_exercise_prompt_user_status_due ON eye_exercise_prompt (user_id, response_status, due_at)')
+
+        if 'eye_exercise_state' not in tables:
+            cursor.execute(
+                '''
+                CREATE TABLE eye_exercise_state (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL UNIQUE,
+                    carry_focus_minutes INTEGER NOT NULL DEFAULT 0,
+                    active_prompt_id INTEGER,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES user (id),
+                    FOREIGN KEY(active_prompt_id) REFERENCES eye_exercise_prompt (id)
+                )
+                '''
+            )
+            cursor.execute('CREATE INDEX IF NOT EXISTS ix_eye_exercise_state_user_active ON eye_exercise_state (user_id, active_prompt_id)')
+
+        if 'eye_exercise_state' in tables:
+            _ensure_column(cursor, 'eye_exercise_state', 'carry_focus_minutes', 'carry_focus_minutes INTEGER NOT NULL DEFAULT 0')
+            _ensure_column(cursor, 'eye_exercise_state', 'active_prompt_id', 'active_prompt_id INTEGER')
+            _ensure_column(cursor, 'eye_exercise_state', 'updated_at', 'updated_at DATETIME')
+            _ensure_index(cursor, 'ix_eye_exercise_state_user_active', 'CREATE INDEX IF NOT EXISTS ix_eye_exercise_state_user_active ON eye_exercise_state (user_id, active_prompt_id)')
 
         conn.commit()
 

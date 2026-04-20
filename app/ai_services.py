@@ -573,9 +573,10 @@ def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, A
             'rules': [
                 'Return ONLY valid JSON.',
                 'Sound warm, human, and grounded, not robotic or overly formal.',
-                'Keep the reply supportive but practical, usually 3 to 6 sentences.',
+                'Keep the reply supportive but practical, usually 2 to 5 short sentences.',
                 'Use the wellness scores as quiet context. Mention them only when naturally helpful.',
                 'Validate the feeling first, then offer one small concrete next step.',
+                'Prefer short, natural sentences that can be shown one by one in chat.',
                 'Do not pretend to replace a close friend, therapist, doctor, or emergency help.',
                 'If the user sounds intensely distressed, unsafe, or close to panic, say clearly that AI text may not be enough and encourage reaching a trusted person or local emergency support now.',
                 'Avoid empty praise and avoid repeating the same sentence patterns.',

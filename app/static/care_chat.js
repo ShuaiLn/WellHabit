@@ -14,6 +14,7 @@
     let messages = [];
     let sending = false;
     let ending = false;
+    let typingVisible = false;
 
     function saveState() {
         try {
@@ -54,41 +55,79 @@
         return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     }
 
+    function appendMessageRow(item) {
+        const row = document.createElement('div');
+        row.className = `care-message-row ${item.role === 'assistant' ? 'assistant' : 'user'}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = `care-message-avatar ${item.role === 'assistant' ? 'assistant' : 'user'}`;
+        avatar.textContent = item.role === 'assistant' ? 'AI' : 'You';
+
+        const bubble = document.createElement('article');
+        bubble.className = `care-bubble ${item.role === 'assistant' ? 'assistant' : 'user'}`;
+
+        const meta = document.createElement('div');
+        meta.className = 'care-bubble-meta';
+        meta.textContent = `${item.role === 'assistant' ? 'Care AI' : 'You'} · ${item.time || timeLabel()}`;
+
+        const body = document.createElement('p');
+        body.textContent = item.content;
+
+        bubble.appendChild(meta);
+        bubble.appendChild(body);
+
+        if (item.risk_level && item.role === 'assistant') {
+            const badge = document.createElement('span');
+            badge.className = `care-risk-pill ${item.risk_level}`;
+            badge.textContent = item.risk_level === 'high'
+                ? 'Extra support suggested'
+                : (item.risk_level === 'medium' ? 'Grounding support' : 'Gentle support');
+            bubble.appendChild(badge);
+        }
+
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+        messagesEl.appendChild(row);
+    }
+
+    function appendTypingRow() {
+        const row = document.createElement('div');
+        row.className = 'care-message-row assistant care-typing-row';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'care-message-avatar assistant';
+        avatar.textContent = 'AI';
+
+        const bubble = document.createElement('article');
+        bubble.className = 'care-bubble assistant care-typing-bubble';
+
+        const meta = document.createElement('div');
+        meta.className = 'care-bubble-meta';
+        meta.textContent = 'Care AI · typing';
+
+        const dots = document.createElement('div');
+        dots.className = 'care-typing-dots';
+        dots.innerHTML = '<span></span><span></span><span></span>';
+
+        bubble.appendChild(meta);
+        bubble.appendChild(dots);
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+        messagesEl.appendChild(row);
+    }
+
     function renderMessages() {
         messagesEl.innerHTML = '';
-        messages.forEach((item) => {
-            const row = document.createElement('div');
-            row.className = `care-message-row ${item.role === 'assistant' ? 'assistant' : 'user'}`;
-
-            const avatar = document.createElement('div');
-            avatar.className = `care-message-avatar ${item.role === 'assistant' ? 'assistant' : 'user'}`;
-            avatar.textContent = item.role === 'assistant' ? 'AI' : 'You';
-
-            const bubble = document.createElement('article');
-            bubble.className = `care-bubble ${item.role === 'assistant' ? 'assistant' : 'user'}`;
-
-            const meta = document.createElement('div');
-            meta.className = 'care-bubble-meta';
-            meta.textContent = `${item.role === 'assistant' ? 'Care AI' : 'You'} · ${item.time || timeLabel()}`;
-
-            const body = document.createElement('p');
-            body.textContent = item.content;
-
-            bubble.appendChild(meta);
-            bubble.appendChild(body);
-
-            if (item.risk_level && item.role === 'assistant') {
-                const badge = document.createElement('span');
-                badge.className = `care-risk-pill ${item.risk_level}`;
-                badge.textContent = item.risk_level === 'high' ? 'Extra support suggested' : (item.risk_level === 'medium' ? 'Grounding support' : 'Gentle support');
-                bubble.appendChild(badge);
-            }
-
-            row.appendChild(avatar);
-            row.appendChild(bubble);
-            messagesEl.appendChild(row);
-        });
+        messages.forEach(appendMessageRow);
+        if (typingVisible) {
+            appendTypingRow();
+        }
         messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function setTypingVisible(visible) {
+        typingVisible = visible;
+        renderMessages();
     }
 
     function pushMessage(role, content, riskLevel) {
@@ -97,11 +136,64 @@
         renderMessages();
     }
 
+    function splitAssistantReply(text) {
+        const normalized = (text || '').replace(/\r/g, '').trim();
+        if (!normalized) return [];
+        const linePieces = normalized
+            .split(/\n+/)
+            .map((part) => part.trim())
+            .filter(Boolean);
+        const pieces = [];
+        linePieces.forEach((line) => {
+            const sentenceParts = line
+                .split(/(?<=[.!?。！？])\s+/)
+                .map((part) => part.trim())
+                .filter(Boolean);
+            if (sentenceParts.length) {
+                pieces.push(...sentenceParts);
+            } else {
+                pieces.push(line);
+            }
+        });
+        const merged = [];
+        pieces.forEach((piece) => {
+            if (!merged.length) {
+                merged.push(piece);
+                return;
+            }
+            if (piece.length < 22) {
+                merged[merged.length - 1] = `${merged[merged.length - 1]} ${piece}`.trim();
+            } else {
+                merged.push(piece);
+            }
+        });
+        return merged.slice(0, 6);
+    }
+
+    function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function playAssistantReply(text, riskLevel) {
+        const chunks = splitAssistantReply(text);
+        if (!chunks.length) {
+            pushMessage('assistant', 'I\'m here with you.', riskLevel || 'low');
+            return;
+        }
+        for (let index = 0; index < chunks.length; index += 1) {
+            pushMessage('assistant', chunks[index], index === chunks.length - 1 ? (riskLevel || 'low') : null);
+            if (index < chunks.length - 1) {
+                await wait(380);
+            }
+        }
+    }
+
     async function sendMessage(content) {
         if (!content || sending || ending) return;
         pushMessage('user', content, null);
         setBusy(true);
-        statusEl.textContent = 'Care AI is replying...';
+        setTypingVisible(true);
+        statusEl.textContent = 'Care AI is typing...';
 
         try {
             const response = await fetch(config.messageUrl, {
@@ -113,12 +205,14 @@
             if (!response.ok) {
                 throw new Error(body.message || 'Reply failed.');
             }
-            pushMessage('assistant', body.assistant_message || 'I’m here with you.', body.risk_level || 'low');
+            setTypingVisible(false);
+            await playAssistantReply(body.assistant_message || 'I\'m here with you.', body.risk_level || 'low');
             statusEl.textContent = body.risk_level === 'high'
                 ? 'The reply suggested extra real-world support.'
                 : 'The chat will update your scores after it ends.';
         } catch (error) {
-            pushMessage('assistant', 'I hit a problem replying just now, but I’m still here. Try sending that again in a moment.', 'low');
+            setTypingVisible(false);
+            pushMessage('assistant', 'I hit a problem replying just now, but I\'m still here. Try sending that again in a moment.', 'low');
             statusEl.textContent = 'Reply failed once. You can try again.';
         } finally {
             setBusy(false);
@@ -205,7 +299,7 @@
         renderMessages();
     } else {
         messages = [];
-        pushMessage('assistant', config.introMessage || 'I’m here with you.', 'low');
+        pushMessage('assistant', config.introMessage || 'I\'m here with you.', 'low');
         statusEl.textContent = 'Start anywhere. You can talk about tiredness, anxiety, happiness, or stress.';
     }
 })();

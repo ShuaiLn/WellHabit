@@ -21,8 +21,13 @@ class User(UserMixin, db.Model):
     daily_sleep_goal_hours = db.Column(db.Float, nullable=False, default=8.0)
     daily_step_goal = db.Column(db.Integer, nullable=False, default=8000)
     daily_exercise_goal_minutes = db.Column(db.Integer, nullable=False, default=30)
+    goal_progress_intensity = db.Column(db.String(12), nullable=False, default='medium')
     optimal_bedtime = db.Column(db.String(5))
     optimal_wake_time = db.Column(db.String(5))
+    hydration_wake_time = db.Column(db.String(5))
+    hydration_breakfast_time = db.Column(db.String(5))
+    hydration_lunch_time = db.Column(db.String(5))
+    hydration_dinner_time = db.Column(db.String(5))
 
     hydration_score = db.Column(db.Integer, nullable=False, default=50)
     energy_score = db.Column(db.Integer, nullable=False, default=50)
@@ -30,6 +35,7 @@ class User(UserMixin, db.Model):
     focus_score = db.Column(db.Integer, nullable=False, default=50)
     mood_score = db.Column(db.Integer, nullable=False, default=50)
     overall_wellness_score = db.Column(db.Integer, nullable=False, default=50)
+    avatar_emoji = db.Column(db.String(16), nullable=False, default='🙂')
     wellness_summary = db.Column(db.Text)
     wellness_updated_at = db.Column(db.DateTime)
 
@@ -40,6 +46,8 @@ class User(UserMixin, db.Model):
     hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy=True, cascade='all, delete-orphan')
     activity_entries = db.relationship('ActivityEntry', backref='user', lazy=True, cascade='all, delete-orphan')
     mood_entries = db.relationship('MoodEntry', backref='user', lazy=True, cascade='all, delete-orphan')
+    eye_exercise_prompts = db.relationship('EyeExercisePrompt', backref='user', lazy=True, cascade='all, delete-orphan')
+    eye_exercise_states = db.relationship('EyeExerciseState', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -144,3 +152,25 @@ class MoodEntry(db.Model):
     summary = db.Column(db.Text)
     detected_by = db.Column(db.String(20), nullable=False, default='user')
     event_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+
+class EyeExercisePrompt(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    focus_minutes_trigger = db.Column(db.Integer, nullable=False, default=25)
+    threshold_minutes = db.Column(db.Integer, nullable=False, default=25)
+    video_url = db.Column(db.String(300), nullable=False, default='https://www.youtube.com/watch?v=iVb4vUp70zY')
+    response_status = db.Column(db.String(20), nullable=False, default='pending')
+    due_at = db.Column(db.DateTime, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    responded_at = db.Column(db.DateTime)
+
+
+class EyeExerciseState(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
+    carry_focus_minutes = db.Column(db.Integer, nullable=False, default=0)
+    active_prompt_id = db.Column(db.Integer, db.ForeignKey('eye_exercise_prompt.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

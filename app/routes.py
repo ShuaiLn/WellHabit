@@ -23,10 +23,13 @@ from .ai_services import (
     summarize_care_chat_session,
     update_wellness_scores,
 )
-from .models import ActivityEntry, CalendarEvent, DailyLog, HydrationPrompt, MoodEntry, PomodoroSession, Task, User
+from .models import ActivityEntry, CalendarEvent, DailyLog, EyeExercisePrompt, EyeExerciseState, HydrationPrompt, MoodEntry, PomodoroSession, Task, User
 
 LOCAL_TZ = ZoneInfo('America/Los_Angeles')
 GLASS_VOLUME_ML = 250
+EYE_EXERCISE_THRESHOLD_MINUTES = 25
+EYE_EXERCISE_VIDEO_URL = 'https://www.youtube.com/watch?v=iVb4vUp70zY'
+GOAL_INTENSITY_CHOICES = [('easy', 'Easy'), ('medium', 'Medium'), ('hard', 'Hard')]
 
 WELLNESS_META = [
     ('hydration', 'Hydration', 'Water goal progress'),
@@ -142,6 +145,41 @@ def _mood_badge_payload(mood_label: str | None, custom_text: str | None = None) 
 
 def _selected_mood_emoji(mood_label: str | None) -> str:
     return EMOJI_BY_LABEL.get((mood_label or '').strip().lower(), '')
+
+
+def _choose_avatar_emoji_from_scores(user: User, after_scores: dict[str, int], feedback: dict | None = None) -> str:
+    hydration = int(after_scores.get('hydration') or 50)
+    energy = int(after_scores.get('energy') or 50)
+    fitness = int(after_scores.get('fitness') or 50)
+    focus = int(after_scores.get('focus') or 50)
+    mood = int(after_scores.get('mood') or 50)
+    overall = int(after_scores.get('overall') or 50)
+
+    if overall >= 85 and mood >= 80:
+        return '🤩'
+    if overall >= 75 and focus >= 70 and energy >= 70:
+        return '😄'
+    if hydration < 35 and energy < 40:
+        return '🥵'
+    if energy < 35:
+        return '😴'
+    if mood < 35 and overall < 45:
+        return '😢'
+    if focus < 35 and energy < 50:
+        return '😵‍💫'
+    if mood >= 70 and overall >= 60:
+        return '😊'
+    if focus >= 75 and overall >= 60:
+        return '🧠'
+    if fitness >= 75 and overall >= 60:
+        return '💪'
+    if hydration >= 75 and mood >= 60:
+        return '💧'
+    if overall >= 60:
+        return '🙂'
+    if overall >= 45:
+        return '😐'
+    return '😮‍💨'
 
 
 def _record_mood_entry(user_id: int, source: str, mood_label: str | None, custom_text: str | None = None, summary: str | None = None, log: DailyLog | None = None, event_at: datetime | None = None, detected_by: str = 'user') -> MoodEntry:
@@ -308,6 +346,8 @@ def _task_type(task: Task) -> str:
     normalized = _normalize_task_text(task.title)
     if normalized in {item[1] for item in MEAL_TASKS}:
         return 'meal'
+    if 'eye exercise' in normalized or '眼保健操' in (task.title or ''):
+        return 'eye_exercise'
     return 'regular'
 
 
@@ -323,8 +363,13 @@ def _task_is_hydration(task: Task) -> bool:
 
 
 
+def _task_is_eye_exercise(task: Task) -> bool:
+    return _task_type(task) == 'eye_exercise' or 'eye exercise' in _normalize_task_text(task.title) or '眼保健操' in (task.title or '')
+
+
+
 def _task_is_focus_eligible(task: Task) -> bool:
-    return not _task_is_meal(task) and not _task_is_hydration(task)
+    return not _task_is_meal(task) and not _task_is_hydration(task) and not _task_is_eye_exercise(task)
 
 
 
@@ -564,6 +609,8 @@ def _ensure_baseline_scores(user: User):
     user.focus_score = 50
     user.mood_score = 50
     user.overall_wellness_score = 50
+    user.avatar_emoji = user.avatar_emoji or '🙂'
+    user.goal_progress_intensity = (user.goal_progress_intensity or 'medium').strip().lower() or 'medium'
     user.wellness_summary = 'Scores start at a neutral 50 and move with your recent habits.'
     user.wellness_updated_at = local_now().replace(tzinfo=None)
     db.session.flush()
@@ -635,92 +682,13 @@ def _normalize_beverage(beverage: str, custom_beverage: str = '') -> str:
 
 
 
-def _ensure_daily_morning_prompt(user_id: int) -> HydrationPrompt | None:
-    user = db.session.get(User, user_id)
-    if not user:
-        return None
-    now = local_now().replace(tzinfo=None)
-    today = now.date()
-    wake_dt, _ = _sleep_schedule_for_date(user, today)
-    wake_due = wake_dt.replace(tzinfo=None)
-    if now < wake_due or now.hour >= 12:
-        return None
-
-    existing = HydrationPrompt.query.filter(
-        HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type == 'morning',
-        db.func.date(HydrationPrompt.due_at) == today,
-    ).order_by(HydrationPrompt.id.desc()).first()
-    if existing:
-        return existing if existing.response_status in {'pending', 'not_yet'} else None
-
-    prompt = HydrationPrompt(
-        user_id=user_id,
-        prompt_type='morning',
-        due_at=now,
-        message='Good morning. Start your day with one glass of water.',
-        response_status='pending',
-    )
-    db.session.add(prompt)
-    db.session.flush()
-    return prompt
-
-
-
-def _suppress_today_hydration_prompts(user_id: int, keep_prompt_id: int | None = None) -> None:
-    today = local_today()
-    active_prompts = HydrationPrompt.query.filter(
-        HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type.in_(['morning', 'meal_followup', 'planned_hydration']),
-        HydrationPrompt.response_status.in_(['pending', 'not_yet']),
-        db.func.date(HydrationPrompt.due_at) == today,
-    ).all()
-    dismissed_at = local_now().replace(tzinfo=None)
-    for prompt in active_prompts:
-        if keep_prompt_id and prompt.id == keep_prompt_id:
-            continue
-        prompt.response_status = 'dismissed'
-        prompt.responded_at = dismissed_at
-
-
-def _create_immediate_hydration_prompt(user_id: int, message: str) -> HydrationPrompt:
-    _suppress_today_hydration_prompts(user_id)
-    prompt = HydrationPrompt(
-        user_id=user_id,
-        prompt_type='meal_followup',
-        due_at=local_now().replace(tzinfo=None),
-        message=message,
-        response_status='pending',
-    )
-    db.session.add(prompt)
-    db.session.flush()
-    return prompt
-
-
-
-def _defer_active_hydration_prompts(user_id: int, until_dt: datetime, keep_prompt_id: int | None = None) -> None:
-    active_prompts = HydrationPrompt.query.filter(
-        HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type.in_(['morning', 'meal_followup', 'planned_hydration']),
-        HydrationPrompt.response_status.in_(['pending', 'not_yet']),
-        db.func.date(HydrationPrompt.due_at) == until_dt.date(),
-    ).all()
-
-    deferred_at = local_now().replace(tzinfo=None)
-    for prompt in active_prompts:
-        if keep_prompt_id and prompt.id == keep_prompt_id:
-            continue
-        prompt.response_status = 'not_yet'
-        prompt.due_at = max(prompt.due_at or until_dt, until_dt)
-        prompt.responded_at = deferred_at
-
-
 def _parse_clock_text(value: str | None, fallback: str) -> datetime.time:
     text_value = (value or fallback or '').strip() or fallback
     try:
         return datetime.strptime(text_value, '%H:%M').time()
     except ValueError:
         return datetime.strptime(fallback, '%H:%M').time()
+
 
 
 def _sleep_schedule_for_date(user: User, target_date: date) -> tuple[datetime, datetime]:
@@ -733,27 +701,62 @@ def _sleep_schedule_for_date(user: User, target_date: date) -> tuple[datetime, d
     return wake_dt, bedtime_dt
 
 
-def _hydration_schedule_times(user: User, target_date: date) -> list[datetime]:
-    wake_dt, bedtime_dt = _sleep_schedule_for_date(user, target_date)
-    total_glasses = max(1, math.ceil(max(int(user.daily_water_goal_ml or 2000), GLASS_VOLUME_ML) / GLASS_VOLUME_ML))
-    total_window = max((bedtime_dt - wake_dt).total_seconds(), 4 * 3600)
-    edge_buffer = min(total_window * 0.08, 45 * 60)
-    start_dt = wake_dt + timedelta(seconds=edge_buffer)
-    end_dt = bedtime_dt - timedelta(seconds=edge_buffer)
-    if end_dt <= start_dt:
-        start_dt = wake_dt
-        end_dt = bedtime_dt
-    if total_glasses == 1:
-        return [start_dt + (end_dt - start_dt) / 2]
-    span_seconds = max((end_dt - start_dt).total_seconds(), 1)
-    step_seconds = span_seconds / (total_glasses - 1)
-    return [start_dt + timedelta(seconds=step_seconds * index) for index in range(total_glasses)]
+HYDRATION_SLOT_META = [
+    ('scheduled_wake', 'Wake-up glass', 'hydration_wake_time'),
+    ('scheduled_breakfast', 'Breakfast glass', 'hydration_breakfast_time'),
+    ('scheduled_lunch', 'Lunch glass', 'hydration_lunch_time'),
+    ('scheduled_dinner', 'Dinner glass', 'hydration_dinner_time'),
+]
+
+
+def _default_hydration_schedule_map(user: User) -> dict[str, str]:
+    wake_text = (user.optimal_wake_time or '07:00').strip()[:5] or '07:00'
+    wake_time = _parse_clock_text(wake_text, '07:00')
+    wake_dt = datetime.combine(local_today(), wake_time)
+    defaults = {
+        'hydration_wake_time': wake_dt.strftime('%H:%M'),
+        'hydration_breakfast_time': (wake_dt + timedelta(hours=1)).strftime('%H:%M'),
+        'hydration_lunch_time': '12:30',
+        'hydration_dinner_time': '18:30',
+    }
+    return defaults
+
+
+
+def _ensure_hydration_schedule_defaults(user: User) -> None:
+    defaults = _default_hydration_schedule_map(user)
+    changed = False
+    for field_name, fallback in defaults.items():
+        current_value = (getattr(user, field_name, None) or '').strip()[:5]
+        normalized_value = _parse_clock_text(current_value or fallback, fallback).strftime('%H:%M')
+        if current_value != normalized_value:
+            setattr(user, field_name, normalized_value)
+            changed = True
+    if changed:
+        db.session.flush()
+
+
+
+def _hydration_schedule_rows(user: User) -> list[dict[str, str]]:
+    _ensure_hydration_schedule_defaults(user)
+    rows = []
+    for slot_key, label, field_name in HYDRATION_SLOT_META:
+        time_text = _parse_clock_text(getattr(user, field_name, None), _default_hydration_schedule_map(user)[field_name]).strftime('%H:%M')
+        rows.append({
+            'slot_key': slot_key,
+            'label': label,
+            'field_name': field_name,
+            'time_text': time_text,
+            'display_time': datetime.strptime(time_text, '%H:%M').strftime('%I:%M %p').lstrip('0'),
+        })
+    return rows
+
 
 
 def _retire_legacy_hydration_prompts(user_id: int, target_date: date) -> None:
     legacy = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type.in_(['meal_now', 'meal_plus_2h']),
+        HydrationPrompt.prompt_type.in_(['morning', 'meal_followup', 'meal_now', 'meal_plus_2h']),
         HydrationPrompt.response_status.in_(['pending', 'not_yet']),
         db.func.date(HydrationPrompt.due_at) == target_date,
     ).all()
@@ -762,71 +765,74 @@ def _retire_legacy_hydration_prompts(user_id: int, target_date: date) -> None:
         prompt.responded_at = local_now().replace(tzinfo=None)
 
 
-def _hydration_prompt_message(user: User, due_at: datetime, consumed_ml: int, goal_ml: int) -> str:
-    remaining_ml = max(goal_ml - consumed_ml, 0)
-    remaining_glasses = max(1, math.ceil(remaining_ml / GLASS_VOLUME_ML)) if remaining_ml else 0
+
+def _hydrate_prompt_message_from_slot(label: str, due_at: datetime) -> str:
     time_label = due_at.strftime('%I:%M %p').lstrip('0')
-    if remaining_glasses <= 1:
-        return f"One more glass should help you finish today's water target. Try around {time_label}."
-    return f"Your water goal is paced across the day. Try one glass around {time_label}. About {remaining_glasses} glasses are still left today."
+    return f"{label} reminder: have one glass of water around {time_label}."
+
 
 
 def _sync_goal_based_hydration_prompts(user: User, target_date: date | None = None) -> None:
     chosen_date = target_date or local_today()
-    if chosen_date != local_today():
+    if chosen_date != local_today() or not _profile_locked(user):
         return
 
+    _ensure_hydration_schedule_defaults(user)
     _retire_legacy_hydration_prompts(user.id, chosen_date)
-    log = DailyLog.query.filter_by(user_id=user.id, log_date=chosen_date).first()
-    consumed_ml = int(log.water_ml or 0) if log else 0
-    goal_ml = max(int(user.daily_water_goal_ml or 2000), GLASS_VOLUME_ML)
-    remaining_slots = max(0, math.ceil(max(goal_ml - consumed_ml, 0) / GLASS_VOLUME_ML))
+    schedule_rows = _hydration_schedule_rows(user)
+    now = local_now().replace(tzinfo=None)
 
-    planned_times = _hydration_schedule_times(user, chosen_date)
-    completed_slots = max(0, len(planned_times) - remaining_slots)
-    desired_times = planned_times[completed_slots:]
+    desired_by_type = {}
+    for row in schedule_rows:
+        due_at = datetime.combine(chosen_date, _parse_clock_text(row['time_text'], row['time_text']))
+        desired_by_type[row['slot_key']] = {
+            'label': row['label'],
+            'due_at': due_at,
+            'message': _hydrate_prompt_message_from_slot(row['label'], due_at),
+        }
 
-    existing = HydrationPrompt.query.filter(
+    existing_rows = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user.id,
-        HydrationPrompt.prompt_type == 'planned_hydration',
-        HydrationPrompt.response_status.in_(['pending', 'not_yet']),
+        HydrationPrompt.prompt_type.in_(list(desired_by_type.keys())),
         db.func.date(HydrationPrompt.due_at) == chosen_date,
     ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).all()
+    existing_by_type = {row.prompt_type: row for row in existing_rows}
 
-    while len(existing) > len(desired_times):
-        prompt = existing.pop()
-        prompt.response_status = 'dismissed'
-        prompt.responded_at = local_now().replace(tzinfo=None)
+    for prompt_type, payload in desired_by_type.items():
+        prompt = existing_by_type.get(prompt_type)
+        if not prompt:
+            prompt = HydrationPrompt(
+                user_id=user.id,
+                prompt_type=prompt_type,
+                due_at=payload['due_at'],
+                message=payload['message'],
+                response_status='pending',
+            )
+            db.session.add(prompt)
+            db.session.flush()
+            continue
 
-    while len(existing) < len(desired_times):
-        prompt = HydrationPrompt(
-            user_id=user.id,
-            prompt_type='planned_hydration',
-            due_at=desired_times[len(existing)],
-            message='Goal-based hydration reminder.',
-            response_status='pending',
-        )
-        db.session.add(prompt)
-        db.session.flush()
-        existing.append(prompt)
+        if prompt.response_status in {'finished', 'dismissed'}:
+            prompt.message = payload['message']
+            continue
 
-    for prompt, due_at in zip(existing, desired_times):
-        chosen_due_at = prompt.due_at if prompt.response_status == 'not_yet' and prompt.due_at and prompt.due_at > due_at else due_at
-        prompt.prompt_type = 'planned_hydration'
+        chosen_due_at = payload['due_at']
+        if prompt.response_status == 'not_yet' and prompt.due_at and prompt.due_at > now:
+            chosen_due_at = prompt.due_at
         prompt.due_at = chosen_due_at
-        prompt.message = _hydration_prompt_message(user, chosen_due_at, consumed_ml, goal_ml)
+        prompt.message = _hydrate_prompt_message_from_slot(payload['label'], chosen_due_at)
         if prompt.response_status not in {'pending', 'not_yet'}:
             prompt.response_status = 'pending'
 
 
+
 def _get_due_and_upcoming_prompt(user_id: int):
     user = db.session.get(User, user_id)
-    if not user:
+    if not user or not _profile_locked(user):
         return None, None
     _sync_goal_based_hydration_prompts(user, local_today())
-    _ensure_daily_morning_prompt(user_id)
     now = local_now().replace(tzinfo=None)
-    active_types = ['morning', 'meal_followup', 'planned_hydration']
+    active_types = [slot_key for slot_key, _, _ in HYDRATION_SLOT_META]
     due_prompt = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user_id,
         HydrationPrompt.prompt_type.in_(active_types),
@@ -846,16 +852,162 @@ def _get_due_and_upcoming_prompt(user_id: int):
     return due_prompt, upcoming_prompt
 
 
+
 def _serialize_prompt(prompt: HydrationPrompt | None):
     if not prompt:
         return None
+    slot_label = next((label for slot_key, label, _ in HYDRATION_SLOT_META if slot_key == prompt.prompt_type), 'Water reminder')
     return {
         'id': prompt.id,
         'prompt_type': prompt.prompt_type,
+        'slot_label': slot_label,
         'message': prompt.message,
         'due_at_iso': prompt.due_at.isoformat() if prompt.due_at else None,
         'response_status': prompt.response_status,
         'beverage': prompt.beverage,
+    }
+
+
+def _get_or_create_eye_exercise_state(user_id: int) -> EyeExerciseState:
+    state = EyeExerciseState.query.filter_by(user_id=user_id).first()
+    if state:
+        if state.updated_at is None:
+            state.updated_at = local_now().replace(tzinfo=None)
+        return state
+    now = local_now().replace(tzinfo=None)
+    state = EyeExerciseState(
+        user_id=user_id,
+        carry_focus_minutes=0,
+        active_prompt_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+    db.session.add(state)
+    db.session.flush()
+    return state
+
+
+
+def _get_active_eye_exercise_prompt(user_id: int) -> EyeExercisePrompt | None:
+    state = _get_or_create_eye_exercise_state(user_id)
+    prompt = None
+    if state.active_prompt_id:
+        prompt = EyeExercisePrompt.query.filter_by(id=state.active_prompt_id, user_id=user_id).first()
+        if prompt and prompt.response_status in {'pending', 'watching', 'not_yet'}:
+            return prompt
+        state.active_prompt_id = None
+        state.updated_at = local_now().replace(tzinfo=None)
+    return None
+
+
+
+def _serialize_eye_exercise_prompt(prompt: EyeExercisePrompt | None):
+    if not prompt:
+        return None
+    return {
+        'id': prompt.id,
+        'message': f"You've focused for {int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES)} minutes. Do you want to do an eye exercise now?",
+        'focus_minutes_trigger': int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES),
+        'threshold_minutes': int(prompt.threshold_minutes or EYE_EXERCISE_THRESHOLD_MINUTES),
+        'response_status': prompt.response_status,
+        'video_url': prompt.video_url or EYE_EXERCISE_VIDEO_URL,
+        'embed_url': 'https://www.youtube.com/embed/iVb4vUp70zY',
+        'due_at_iso': prompt.due_at.isoformat() if prompt.due_at else None,
+        'source_text': 'Source: YouTube · lenstark.com',
+    }
+
+
+
+def _ensure_eye_exercise_task(user_id: int, task_date: date, focus_minutes: int | None = None) -> Task:
+    existing_task = Task.query.filter_by(user_id=user_id, task_date=task_date, task_type='eye_exercise', completed=False).order_by(Task.id.desc()).first()
+    if existing_task:
+        return existing_task
+    focus_text = f' after {focus_minutes} min focus' if focus_minutes else ''
+    task = Task(
+        user_id=user_id,
+        title='Do eye exercise',
+        description=f'Recommended{focus_text}.',
+        task_type='eye_exercise',
+        task_date=task_date,
+        completed=False,
+        sort_order=_get_next_sort_order(user_id, task_date),
+    )
+    db.session.add(task)
+    db.session.flush()
+    return task
+
+
+
+def _dismiss_eye_exercise_task(user_id: int, task_date: date | None = None) -> None:
+    chosen_date = task_date or local_today()
+    pending_tasks = Task.query.filter_by(user_id=user_id, task_date=chosen_date, task_type='eye_exercise', completed=False).all()
+    for task in pending_tasks:
+        db.session.delete(task)
+
+
+
+def _queue_eye_exercise_prompt(user_id: int, focus_minutes: int, completed_at: datetime | None = None) -> EyeExercisePrompt | None:
+    if int(focus_minutes or 0) <= 0:
+        return _get_active_eye_exercise_prompt(user_id)
+    active_prompt = _get_active_eye_exercise_prompt(user_id)
+    state = _get_or_create_eye_exercise_state(user_id)
+    now = (completed_at or local_now()).replace(tzinfo=None)
+    if active_prompt:
+        state.updated_at = now
+        return active_prompt
+    state.carry_focus_minutes = int(state.carry_focus_minutes or 0) + int(focus_minutes or 0)
+    state.updated_at = now
+    if state.carry_focus_minutes < EYE_EXERCISE_THRESHOLD_MINUTES:
+        return None
+    prompt = EyeExercisePrompt(
+        user_id=user_id,
+        focus_minutes_trigger=int(state.carry_focus_minutes or EYE_EXERCISE_THRESHOLD_MINUTES),
+        threshold_minutes=EYE_EXERCISE_THRESHOLD_MINUTES,
+        video_url=EYE_EXERCISE_VIDEO_URL,
+        response_status='pending',
+        due_at=now,
+        created_at=now,
+    )
+    db.session.add(prompt)
+    db.session.flush()
+    state.carry_focus_minutes = 0
+    state.active_prompt_id = prompt.id
+    state.updated_at = now
+    return prompt
+
+
+
+def _complete_eye_exercise(user: User, target_date: date | None = None, event_at: datetime | None = None, source_label: str = 'video') -> dict:
+    chosen_date = target_date or local_today()
+    completed_at = (event_at or local_now()).replace(tzinfo=None)
+    state = _get_or_create_eye_exercise_state(user.id)
+    prompt = _get_active_eye_exercise_prompt(user.id)
+    if not prompt:
+        prompt = EyeExercisePrompt.query.filter(
+            EyeExercisePrompt.user_id == user.id,
+            EyeExercisePrompt.response_status.in_(['pending', 'watching', 'not_yet']),
+        ).order_by(EyeExercisePrompt.created_at.desc(), EyeExercisePrompt.id.desc()).first()
+    focus_trigger = 0
+    if prompt:
+        focus_trigger = int(prompt.focus_minutes_trigger or 0)
+        prompt.response_status = 'finished'
+        prompt.responded_at = completed_at
+    state.active_prompt_id = None
+    state.updated_at = completed_at
+    _dismiss_eye_exercise_task(user.id, chosen_date)
+    _add_calendar_event(
+        user.id,
+        'Eye exercise finished',
+        chosen_date,
+        completed_at.time().replace(second=0, microsecond=0),
+        f'Completed after {focus_trigger or EYE_EXERCISE_THRESHOLD_MINUTES} minutes of focus via {source_label}.',
+    )
+    latest_event = f'Completed eye exercise after {focus_trigger or EYE_EXERCISE_THRESHOLD_MINUTES} focus minutes via {source_label}'
+    payload = _apply_wellness_update(user, chosen_date, latest_event)
+    return {
+        'payload': payload,
+        'focus_trigger': focus_trigger or EYE_EXERCISE_THRESHOLD_MINUTES,
+        'event_label': f'Eye exercise finished · {focus_trigger or EYE_EXERCISE_THRESHOLD_MINUTES} min focus · {source_label}',
     }
 
 
@@ -886,6 +1038,8 @@ def _build_profile_payload(user: User) -> dict:
         'daily_sleep_goal_hours': user.daily_sleep_goal_hours or 8.0,
         'daily_step_goal': user.daily_step_goal or 8000,
         'daily_exercise_goal_minutes': user.daily_exercise_goal_minutes or 30,
+        'goal_progress_intensity': (user.goal_progress_intensity or 'medium').strip().lower() or 'medium',
+        'avatar_emoji': user.avatar_emoji or '🙂',
         'optimal_bedtime': user.optimal_bedtime or '22:00',
         'optimal_wake_time': user.optimal_wake_time or '07:00',
     }
@@ -1017,6 +1171,7 @@ def _build_wellness_feedback(payload: dict, previous_scores: dict[str, int]) -> 
         'title': title,
         'message': message,
         'metrics': changed_metrics[:6],
+        'avatar_emoji': payload.get('avatar_emoji') or '🙂',
     }
 
 
@@ -1216,6 +1371,10 @@ def _apply_wellness_update(user: User, target_date: date | None = None, latest_e
     user.focus_score = int(payload.get('focus_score') or 50)
     user.mood_score = int(payload.get('mood_score') or 50)
     user.overall_wellness_score = int(payload.get('overall_wellness_score') or 50)
+    after_scores = _score_snapshot(user)
+    avatar_emoji = _choose_avatar_emoji_from_scores(user, after_scores)
+    user.avatar_emoji = avatar_emoji
+    payload['avatar_emoji'] = avatar_emoji
     user.wellness_summary = str(payload.get('summary') or '')
     user.wellness_updated_at = local_now().replace(tzinfo=None)
     payload['feedback'] = _build_wellness_feedback(payload, previous_scores)
@@ -1472,6 +1631,7 @@ def register_routes(app):
             'nav_local_date': local_now().strftime('%A, %B %d, %Y'),
             'nav_local_time': local_now().strftime('%I:%M %p'),
             'pending_wellness_feedback': _consume_wellness_feedback(),
+            'current_avatar_emoji': (current_user.avatar_emoji if current_user.is_authenticated else '🙂'),
         }
 
     @app.route('/')
@@ -1564,12 +1724,6 @@ def register_routes(app):
 
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
         db.session.commit()
-        morning_prompt_record = HydrationPrompt.query.filter(
-            HydrationPrompt.user_id == current_user.id,
-            HydrationPrompt.prompt_type == 'morning',
-            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
-            db.func.date(HydrationPrompt.due_at) == today,
-        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
 
         return render_template(
             'dashboard.html',
@@ -1581,8 +1735,8 @@ def register_routes(app):
             today_log=today_log,
             due_hydration_prompt=_serialize_prompt(due_prompt),
             upcoming_hydration_prompt=_serialize_prompt(upcoming_prompt),
-            morning_hydration_prompt=_serialize_prompt(morning_prompt_record),
-            morning_prompt_exists=bool(morning_prompt_record),
+            morning_hydration_prompt=None,
+            morning_prompt_exists=False,
             recent_activity_entries=_recent_activity_preview(current_user.id, 6),
         )
 
@@ -1595,17 +1749,28 @@ def register_routes(app):
         if request.method == 'POST':
             action = (request.form.get('action') or 'save_profile').strip().lower()
 
-            if action == 'update_exercise_goal':
-                exercise_goal = _parse_int(request.form.get('daily_exercise_goal_minutes'), default=None)
-                if exercise_goal is None:
-                    flash('Please enter an exercise goal in minutes.', 'danger')
+            if action == 'update_goal_intensity':
+                intensity = (request.form.get('goal_progress_intensity') or 'medium').strip().lower()
+                if intensity not in {'easy', 'medium', 'hard'}:
+                    flash('Please choose easy, medium, or hard.', 'danger')
                     return redirect(url_for('profile'))
-                if not (5 <= exercise_goal <= 300):
-                    flash('Exercise goal should be between 5 and 300 minutes.', 'danger')
-                    return redirect(url_for('profile'))
-                current_user.daily_exercise_goal_minutes = exercise_goal
+                current_user.goal_progress_intensity = intensity
                 db.session.commit()
-                flash('Daily training intensity was updated.', 'success')
+                flash('Goal progress intensity was updated.', 'success')
+                return redirect(url_for('profile'))
+
+            if action == 'update_hydration_schedule':
+                if not locked:
+                    flash('Save your basic profile first, then set daily water reminder times.', 'warning')
+                    return redirect(url_for('profile'))
+                defaults = _default_hydration_schedule_map(current_user)
+                for _, label, field_name in HYDRATION_SLOT_META:
+                    raw_value = (request.form.get(field_name) or '').strip()
+                    normalized = _parse_clock_text(raw_value or defaults[field_name], defaults[field_name]).strftime('%H:%M')
+                    setattr(current_user, field_name, normalized)
+                _sync_goal_based_hydration_prompts(current_user, local_today())
+                db.session.commit()
+                flash('Daily water reminder times were updated.', 'success')
                 return redirect(url_for('profile'))
 
             if locked:
@@ -1644,6 +1809,7 @@ def register_routes(app):
             current_user.daily_step_goal = int(suggested['daily_step_goal'])
             current_user.optimal_bedtime = str(suggested.get('optimal_bedtime') or '22:00')[:5]
             current_user.optimal_wake_time = str(suggested.get('optimal_wake_time') or '07:00')[:5]
+            _ensure_hydration_schedule_defaults(current_user)
             _sync_goal_based_hydration_prompts(current_user, local_today())
             db.session.commit()
             flash('Basic information saved. Daily goals and your recommended sleep schedule were generated automatically.', 'success')
@@ -1651,6 +1817,9 @@ def register_routes(app):
 
         latest_log = DailyLog.query.filter_by(user_id=current_user.id).order_by(DailyLog.log_date.desc()).first()
         today_log = DailyLog.query.filter_by(user_id=current_user.id, log_date=local_today()).first()
+        if locked:
+            _ensure_hydration_schedule_defaults(current_user)
+            db.session.commit()
         return render_template(
             'profile.html',
             wellness_metrics=_serialize_wellness(current_user),
@@ -1662,6 +1831,8 @@ def register_routes(app):
             progress_cards=_build_progress_cards(current_user, today_log),
             quick_stats_cards=_build_quick_stats(current_user.id, local_today()),
             mood_trend=_build_mood_trend_payload(current_user.id, 14),
+            goal_intensity_choices=GOAL_INTENSITY_CHOICES,
+            hydration_schedule_rows=_hydration_schedule_rows(current_user) if locked else [],
         )
 
     @app.route('/history')
@@ -1866,12 +2037,6 @@ def register_routes(app):
         all_logs = DailyLog.query.filter_by(user_id=current_user.id).order_by(DailyLog.log_date.desc()).all()
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
         db.session.commit()
-        morning_prompt_record = HydrationPrompt.query.filter(
-            HydrationPrompt.user_id == current_user.id,
-            HydrationPrompt.prompt_type == 'morning',
-            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
-            db.func.date(HydrationPrompt.due_at) == local_today(),
-        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
         return render_template(
             'logs.html',
             current_log=current_log,
@@ -1879,8 +2044,8 @@ def register_routes(app):
             all_logs=all_logs,
             due_hydration_prompt=_serialize_prompt(due_prompt),
             upcoming_hydration_prompt=_serialize_prompt(upcoming_prompt),
-            morning_hydration_prompt=_serialize_prompt(morning_prompt_record),
-            morning_prompt_exists=bool(morning_prompt_record),
+            morning_hydration_prompt=None,
+            morning_prompt_exists=False,
             current_snapshot=_progress_snapshot(current_user, current_log),
             mood_options=MOOD_OPTIONS,
             mood_emoji_choices=EMOJI_MOOD_CHOICES,
@@ -2011,6 +2176,20 @@ def register_routes(app):
                 task.auto_tracked_water_ml = 0
                 event_label = f'Reopened todo: {task.title} · removed {removed_ml} ml'
                 payload = _apply_wellness_update(current_user, task.task_date, f'Removed {removed_ml} ml from reopened hydration todo: {task.title}')
+        elif _task_is_eye_exercise(task):
+            if task.completed:
+                completion = _complete_eye_exercise(current_user, task.task_date, task.completed_at, source_label='todo')
+                payload = completion.get('payload')
+                event_label = completion.get('event_label') or event_label
+            else:
+                state = _get_or_create_eye_exercise_state(current_user.id)
+                if state.active_prompt_id:
+                    prompt = EyeExercisePrompt.query.filter_by(id=state.active_prompt_id, user_id=current_user.id).first()
+                    if prompt and prompt.response_status == 'finished':
+                        prompt.response_status = 'not_yet'
+                        prompt.responded_at = local_now().replace(tzinfo=None)
+                        state.active_prompt_id = prompt.id
+                        state.updated_at = local_now().replace(tzinfo=None)
         elif task.task_date == local_today() and task.completed and _task_type(task) == 'regular':
             payload = _apply_wellness_update(current_user, task.task_date, event_label)
 
@@ -2041,6 +2220,14 @@ def register_routes(app):
         task = Task.query.filter_by(id=task_id, user_id=current_user.id).first_or_404()
         task_date = task.task_date
         task_title = task.title
+        if _task_is_eye_exercise(task):
+            state = _get_or_create_eye_exercise_state(current_user.id)
+            prompt = _get_active_eye_exercise_prompt(current_user.id)
+            if prompt:
+                prompt.response_status = 'dismissed'
+                prompt.responded_at = local_now().replace(tzinfo=None)
+            state.active_prompt_id = None
+            state.updated_at = local_now().replace(tzinfo=None)
         db.session.delete(task)
         _log_activity_entry(current_user.id, 'task', 'Task deleted', task_title)
         db.session.commit()
@@ -2085,7 +2272,7 @@ def register_routes(app):
             if meal_text:
                 latest_event += f' ({meal_text})'
             meal_entry_description = f'{task.title} · {(meal_text or "meal")} · {meal_time.strftime("%H:%M")}'
-            hydration_prompt = _create_immediate_hydration_prompt(current_user.id, f'You just finished {task.title.lower()}. A glass of water would help keep your hydration on track.')
+            hydration_prompt = None
 
         payload = None
         if task.task_date == local_today() and meal_status == 'finished':
@@ -2198,6 +2385,7 @@ def register_routes(app):
             f'Cycle {cycle_number}: {focus_minutes} min focus + {break_minutes} min break.',
         )
         payload = _apply_wellness_update(current_user, local_today(), f'Completed Pomodoro cycle {cycle_number} for {activity_label}')
+        eye_prompt = _queue_eye_exercise_prompt(current_user.id, focus_minutes, completed_at=completed_at)
         _log_activity_entry(
             current_user.id,
             'pomodoro',
@@ -2214,6 +2402,8 @@ def register_routes(app):
                 'wellness_scores': _serialize_wellness(current_user),
                 'wellness_summary': payload.get('summary'),
                 'wellness_feedback': payload.get('feedback'),
+                'avatar_emoji': current_user.avatar_emoji or '🙂',
+                'eye_prompt': _serialize_eye_exercise_prompt(eye_prompt),
             }
         )
 
@@ -2309,6 +2499,125 @@ def register_routes(app):
             }
         )
 
+    @app.route('/eye-exercise/status')
+    @login_required
+    def eye_exercise_status():
+        prompt = _get_active_eye_exercise_prompt(current_user.id)
+        if prompt and prompt.response_status == 'not_yet':
+            prompt = None
+        db.session.commit()
+        return jsonify({'eye_prompt': _serialize_eye_exercise_prompt(prompt), 'avatar_emoji': current_user.avatar_emoji or '🙂'})
+
+    @app.route('/eye-exercise/respond', methods=['POST'])
+    @login_required
+    def eye_exercise_respond():
+        data = request.get_json(silent=True) or request.form
+        prompt_id = data.get('prompt_id')
+        action = _clean_text(data.get('action') or data.get('response_status') or '', 20).lower()
+
+        prompt = None
+        if prompt_id:
+            try:
+                prompt = EyeExercisePrompt.query.filter_by(id=int(prompt_id), user_id=current_user.id).first()
+            except (TypeError, ValueError):
+                prompt = None
+        if not prompt:
+            prompt = _get_active_eye_exercise_prompt(current_user.id)
+
+        if not prompt:
+            return jsonify({'message': 'Eye exercise prompt not found.'}), 404
+
+        if action not in {'yes', 'start', 'watch', 'finished', 'done', 'not_yet', 'no_thanks', 'dismissed'}:
+            return jsonify({'message': 'Unknown eye exercise action.'}), 400
+
+        state = _get_or_create_eye_exercise_state(current_user.id)
+        now = local_now().replace(tzinfo=None)
+
+        if action in {'yes', 'start', 'watch'}:
+            prompt.response_status = 'watching'
+            prompt.responded_at = now
+            state.active_prompt_id = prompt.id
+            state.updated_at = now
+            db.session.commit()
+            return jsonify({
+                'message': 'Starting the eye exercise video.',
+                'eye_prompt': _serialize_eye_exercise_prompt(prompt),
+                'show_video': True,
+            })
+
+        if action in {'finished', 'done'}:
+            completion = _complete_eye_exercise(current_user, local_today(), now, source_label='video')
+            payload = completion.get('payload') or {}
+            _log_activity_entry(
+                current_user.id,
+                'eye_exercise',
+                'Eye exercise finished',
+                completion.get('event_label') or 'Eye exercise finished',
+                event_at=now,
+                impacts=payload.get('feedback', {}).get('metrics'),
+            )
+            db.session.commit()
+            return jsonify({
+                'message': 'Eye exercise saved.',
+                'eye_prompt': None,
+                'wellness_scores': _serialize_wellness(current_user),
+                'wellness_summary': payload.get('summary'),
+                'wellness_feedback': payload.get('feedback'),
+                'avatar_emoji': current_user.avatar_emoji or '🙂',
+                'refresh_dashboard': True,
+            })
+
+        if action == 'not_yet':
+            prompt.response_status = 'not_yet'
+            prompt.responded_at = now
+            state.active_prompt_id = prompt.id
+            state.updated_at = now
+            task = _ensure_eye_exercise_task(current_user.id, local_today(), int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES))
+            payload = _apply_wellness_update(current_user, local_today(), 'Eye exercise reminder postponed')
+            _log_activity_entry(
+                current_user.id,
+                'eye_exercise',
+                'Eye exercise postponed',
+                f'Added todo: {task.title} after {int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES)} min focus',
+                event_at=now,
+                impacts=payload.get('feedback', {}).get('metrics'),
+            )
+            db.session.commit()
+            return jsonify({
+                'message': "Okay. I added an eye exercise task to today's todo list.",
+                'eye_prompt': None,
+                'wellness_scores': _serialize_wellness(current_user),
+                'wellness_summary': payload.get('summary'),
+                'wellness_feedback': payload.get('feedback'),
+                'avatar_emoji': current_user.avatar_emoji or '🙂',
+                'refresh_dashboard': True,
+            })
+
+        prompt.response_status = 'dismissed'
+        prompt.responded_at = now
+        state.active_prompt_id = None
+        state.updated_at = now
+        _dismiss_eye_exercise_task(current_user.id, local_today())
+        payload = _apply_wellness_update(current_user, local_today(), 'Eye exercise reminder dismissed')
+        _log_activity_entry(
+            current_user.id,
+            'eye_exercise',
+            'Eye exercise dismissed',
+            f'Dismissed after {int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES)} min focus',
+            event_at=now,
+            impacts=payload.get('feedback', {}).get('metrics'),
+        )
+        db.session.commit()
+        return jsonify({
+            'message': 'No problem. The eye exercise reminder was skipped.',
+            'eye_prompt': None,
+            'wellness_scores': _serialize_wellness(current_user),
+            'wellness_summary': payload.get('summary'),
+            'wellness_feedback': payload.get('feedback'),
+            'avatar_emoji': current_user.avatar_emoji or '🙂',
+            'refresh_dashboard': True,
+        })
+
     @app.route('/sleep/status')
     @login_required
     def sleep_status():
@@ -2319,18 +2628,12 @@ def register_routes(app):
     def hydration_status():
         due_prompt, upcoming_prompt = _get_due_and_upcoming_prompt(current_user.id)
         db.session.commit()
-        morning_prompt_record = HydrationPrompt.query.filter(
-            HydrationPrompt.user_id == current_user.id,
-            HydrationPrompt.prompt_type == 'morning',
-            HydrationPrompt.response_status.in_(['pending', 'not_yet']),
-            db.func.date(HydrationPrompt.due_at) == local_today(),
-        ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
         return jsonify(
             {
                 'due_prompt': _serialize_prompt(due_prompt),
                 'upcoming_prompt': _serialize_prompt(upcoming_prompt),
-                'morning_prompt': _serialize_prompt(morning_prompt_record),
-                'morning_prompt_exists': bool(morning_prompt_record),
+                'morning_prompt': None,
+                'morning_prompt_exists': False,
             }
         )
 
@@ -2339,7 +2642,7 @@ def register_routes(app):
     def hydration_respond():
         data = request.get_json(silent=True) or request.form
         prompt_id = data.get('prompt_id')
-        prompt_type = _clean_text(data.get('prompt_type') or 'meal_now', 30).lower()
+        prompt_type = _clean_text(data.get('prompt_type') or 'scheduled_wake', 30).lower()
         action = _clean_text(data.get('action') or data.get('response_status') or '', 20).lower()
         beverage = _clean_text(data.get('beverage') or 'water', 60)
         custom_beverage = _clean_text(data.get('custom_beverage'), 120)
@@ -2380,18 +2683,15 @@ def register_routes(app):
             _sync_goal_based_hydration_prompts(current_user, log.log_date)
             message = f"Great job. Added {amount_ml} ml to today's water total."
         elif action == 'not_yet':
-            prompt.response_status = 'not_yet'
-            deferred_until = (local_now() + timedelta(minutes=20)).replace(tzinfo=None)
-            prompt.due_at = deferred_until
-            _defer_active_hydration_prompts(current_user.id, deferred_until, keep_prompt_id=prompt.id)
+            prompt.response_status = 'dismissed'
             task_date = local_today()
-            reminder_text = 'Drink a glass of water'
+            reminder_text = next((label for slot_key, label, _ in HYDRATION_SLOT_META if slot_key == prompt.prompt_type), 'Drink water')
             existing_task = Task.query.filter_by(user_id=current_user.id, task_date=task_date, title=reminder_text, completed=False).first()
             if not existing_task:
                 db.session.add(Task(
                     user_id=current_user.id,
                     title=reminder_text,
-                    description=None,
+                    description='Added from your fixed water reminder time.',
                     task_type='regular',
                     task_date=task_date,
                     completed=False,
@@ -2400,7 +2700,7 @@ def register_routes(app):
             payload = _apply_wellness_update(current_user, local_today(), 'Hydration reminder postponed')
             _log_activity_entry(current_user.id, 'hydration', 'Hydration reminder postponed', prompt.message, impacts=payload.get('feedback', {}).get('metrics'))
             _sync_goal_based_hydration_prompts(current_user, local_today())
-            message = "Okay. I added a water task to today's todo list and will remind you again later."
+            message = "Okay. I added a water task to today's todo list. The next automatic reminder will wait for your next scheduled water time."
         else:
             prompt.response_status = 'dismissed'
             payload = _apply_wellness_update(current_user, local_today(), 'Hydration reminder skipped')

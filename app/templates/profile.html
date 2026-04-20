@@ -3,8 +3,13 @@
 {% block content %}
 <section class="page-header">
     <div>
-        <h1>{{ current_user.username }}'s Profile</h1>
-        <p class="muted">Your scores, streaks, goals, daily stats, and emotion trends live here.</p>
+        <div class="profile-header-line">
+            <span class="profile-avatar-hero">{{ current_user.avatar_emoji or '🙂' }}</span>
+            <div>
+                <h1>{{ current_user.username }}'s Profile</h1>
+                <p class="muted">Your scores, streaks, goals, daily stats, and emotion trends live here.</p>
+            </div>
+        </div>
     </div>
 </section>
 
@@ -20,7 +25,12 @@
         <p class="muted small profile-panel-time">Sleep by {{ current_user.optimal_bedtime or '22:00' }} · Wake at {{ current_user.optimal_wake_time or '07:00' }}</p>
 
         <div class="profile-note-box progress-box-tight">
-            <p class="eyebrow">Goal Progress</p>
+            <div class="section-title-row compact-head">
+                <div>
+                    <p class="eyebrow">Goal Progress</p>
+                </div>
+                <span class="pill intensity-pill intensity-{{ (current_user.goal_progress_intensity or 'medium').lower() }}">{{ (current_user.goal_progress_intensity or 'medium').title() }}</span>
+            </div>
             <div class="wellness-bars compact-progress-stack">
                 {% for item in progress_cards %}
                     <article class="wellness-row compact-progress-row {% if item.glass_progress %}expandable-progress-row{% endif %}">
@@ -80,17 +90,52 @@
         <div class="profile-note-box goal-editor-box">
             <div class="section-title-row compact-head">
                 <div>
-                    <p class="eyebrow">Exercise Goal</p>
+                    <p class="eyebrow">Goal Progress</p>
                     <h3>Daily Training Intensity</h3>
                 </div>
             </div>
             <form method="post" class="goal-editor-form">
-                <input type="hidden" name="action" value="update_exercise_goal">
+                <input type="hidden" name="action" value="update_goal_intensity">
                 <label>
-                    Exercise goal (minutes)
-                    <input type="number" name="daily_exercise_goal_minutes" min="5" max="300" step="5" value="{{ current_user.daily_exercise_goal_minutes or 30 }}">
+                    Intensity
+                    <select name="goal_progress_intensity">
+                        {% for value, label in goal_intensity_choices %}
+                            <option value="{{ value }}" {% if (current_user.goal_progress_intensity or 'medium') == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
-                <button class="btn secondary full-width" type="submit">Update training intensity</button>
+                <p class="muted small">This controls the overall goal progress intensity view: easy, medium, or hard.</p>
+                <button class="btn secondary full-width" type="submit">Update intensity</button>
+            </form>
+        </div>
+
+        <div class="profile-note-box goal-editor-box">
+            <div class="section-title-row compact-head">
+                <div>
+                    <p class="eyebrow">Hydration Schedule</p>
+                    <h3>Daily Water Reminder Times</h3>
+                </div>
+            </div>
+            <div class="compact-progress-stack hydration-schedule-list">
+                {% for row in hydration_schedule_rows %}
+                    <article class="wellness-row compact-progress-row">
+                        <div class="wellness-row-head compact-progress-head">
+                            <strong>{{ row.label }}</strong>
+                            <span>{{ row.display_time }}</span>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+            <form method="post" class="goal-editor-form hydration-time-form">
+                <input type="hidden" name="action" value="update_hydration_schedule">
+                {% for row in hydration_schedule_rows %}
+                    <label>
+                        {{ row.label }}
+                        <input type="time" name="{{ row.field_name }}" value="{{ row.time_text }}">
+                    </label>
+                {% endfor %}
+                <p class="muted small">These are your only automatic water reminders: wake-up, breakfast, lunch, and dinner.</p>
+                <button class="btn secondary full-width" type="submit">Update water reminder times</button>
             </form>
         </div>
     </aside>

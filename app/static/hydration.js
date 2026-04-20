@@ -13,6 +13,7 @@
     const skipBtn = document.getElementById('hydration-skip-btn');
     const STORAGE_KEY = 'wellhabitActiveHydrationPrompt';
     const PAUSE_KEY = 'wellhabitHydrationPauseUntil';
+    const SEEN_KEY = 'wellhabitSeenHydrationPromptSignatures';
     const STATUS_URL = config.statusUrl || '/hydration/status';
 
     if (!overlay || !titleEl || !messageEl || !beverageEl || !amountEl || !customWrap || !customEl) return;
@@ -43,6 +44,35 @@
             localStorage.removeItem(STORAGE_KEY);
             return null;
         }
+    }
+
+    function promptSignature(prompt) {
+        if (!prompt || !prompt.id) return '';
+        return `${prompt.id}:${prompt.due_at_iso || ''}:${prompt.response_status || ''}`;
+    }
+
+    function getSeenPromptSignatures() {
+        try {
+            const raw = sessionStorage.getItem(SEEN_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function hasSeenPrompt(prompt) {
+        const signature = promptSignature(prompt);
+        return Boolean(signature) && getSeenPromptSignatures().includes(signature);
+    }
+
+    function markPromptSeen(prompt) {
+        const signature = promptSignature(prompt);
+        if (!signature) return;
+        const signatures = getSeenPromptSignatures();
+        if (signatures.includes(signature)) return;
+        signatures.push(signature);
+        sessionStorage.setItem(SEEN_KEY, JSON.stringify(signatures.slice(-30)));
     }
 
     function toggleCustomInput() {
@@ -76,7 +106,7 @@
         return getPauseUntil() > Date.now();
     }
 
-    function openPrompt(prompt, fallbackType) {
+    function openPrompt(prompt, fallbackType, options = {}) {
         if (!prompt || !prompt.id) {
             closePrompt();
             refreshPromptState();
@@ -91,8 +121,8 @@
 
         activePrompt = prompt;
 
-        eyebrowEl.textContent = 'Hydration Reminder';
-        titleEl.textContent = 'Better to drink a glass of water.';
+        eyebrowEl.textContent = activePrompt.slot_label || 'Hydration Reminder';
+        titleEl.textContent = activePrompt.slot_label ? `${activePrompt.slot_label} reminder` : 'Scheduled water reminder';
         messageEl.textContent = activePrompt.message || 'Choose what you want to drink, type an amount, then tell WellHabit if you finished it.';
         beverageEl.value = ['water', 'milk', 'coke', 'other'].includes(activePrompt.beverage) ? activePrompt.beverage : 'water';
         amountEl.value = '';
@@ -100,6 +130,9 @@
         toggleCustomInput();
         setDefaultAmount(activePrompt.prompt_type);
         persistActivePrompt(activePrompt);
+        if (!options.skipSeenMark) {
+            markPromptSeen(activePrompt);
+        }
         overlay.hidden = false;
     }
 
@@ -133,7 +166,13 @@
             config.upcoming = body.upcoming_prompt;
 
             if (body.due_prompt && body.due_prompt.id) {
-                openPrompt(body.due_prompt, body.due_prompt.prompt_type);
+                const duePrompt = body.due_prompt;
+                const isActiveSamePrompt = Boolean(activePrompt && promptSignature(activePrompt) === promptSignature(duePrompt));
+                if (isActiveSamePrompt) {
+                    openPrompt(duePrompt, duePrompt.prompt_type, { skipSeenMark: true });
+                } else if (!hasSeenPrompt(duePrompt)) {
+                    openPrompt(duePrompt, duePrompt.prompt_type);
+                }
             } else if (!document.hidden) {
                 if (!pendingRequest) {
                     closePrompt();
@@ -211,7 +250,7 @@
 
     window.WellHabitHydrationOpenPrompt = function (prompt) {
         if (prompt && prompt.id) {
-            openPrompt(prompt, prompt.prompt_type || 'planned_hydration');
+            openPrompt(prompt, prompt.prompt_type || 'scheduled_wake');
         }
     };
 
@@ -222,10 +261,10 @@
 
     const stored = restoreStoredPrompt();
     if (stored) {
-        openPrompt(stored, stored.prompt_type || 'meal_now');
+        openPrompt(stored, stored.prompt_type || 'scheduled_wake', { skipSeenMark: true });
     }
 
-    if (config.due) {
+    if (config.due && !hasSeenPrompt(config.due)) {
         openPrompt(config.due, config.due.prompt_type);
     }
 

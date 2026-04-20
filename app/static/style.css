@@ -174,6 +174,18 @@ textarea { resize: vertical; }
 .flash.warning { background: #fff8eb; color: var(--warning); border-color: #f7d7a7; }
 .flash.info { background: #effaf3; color: var(--primary-dark); border-color: #c7edd8; }
 
+.btn.secondary {
+    background: #eef6ff;
+    color: #295b8f;
+    border: 1px solid #cddff2;
+}
+
+.btn.ghost {
+    background: #ffffff;
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+
 .date-banner-card { margin-bottom: 22px; }
 .big-date-title { font-size: clamp(1.8rem, 4vw, 3rem); color: var(--primary-dark); }
 
@@ -679,7 +691,7 @@ th { color: var(--muted); font-size: .9rem; }
     position: fixed;
     left: 18px;
     bottom: 18px;
-    width: min(280px, calc(100vw - 36px));
+    width: min(260px, calc(100vw - 36px));
     z-index: 40;
     border: 1px solid var(--line);
     border-radius: 24px;
@@ -701,6 +713,16 @@ th { color: var(--muted); font-size: .9rem; }
     justify-content: space-between;
     gap: 12px;
     align-items: flex-start;
+}
+.global-timer-avatar {
+    width: 36px;
+    height: 36px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: #fff;
+    font-size: 1.2rem;
 }
 .global-timer-drag-zone {
     cursor: grab;
@@ -733,25 +755,43 @@ th { color: var(--muted); font-size: .9rem; }
 .global-timer-mini-face {
     display: grid;
     place-items: center;
-    gap: 2px;
-    width: 74px;
-    height: 74px;
+    gap: 1px;
+    width: 86px;
+    height: 86px;
     border-radius: 999px;
     cursor: grab;
+    padding: 8px;
+}
+.global-timer-mini-avatar {
+    width: 30px;
+    height: 30px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid var(--line);
+    font-size: 1rem;
 }
 .global-timer-mini-label {
     font-size: 1rem;
     line-height: 1;
 }
 .global-timer-mini-time {
-    font-size: .95rem;
+    font-size: .88rem;
     font-weight: 900;
     color: var(--primary-dark);
 }
+.global-timer-mini-caption {
+    font-size: .62rem;
+    line-height: 1;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
 .global-timer-widget.is-minimized {
-    width: 74px;
-    min-width: 74px;
-    min-height: 74px;
+    width: 86px;
+    min-width: 86px;
+    min-height: 86px;
     border-radius: 999px;
     padding: 0;
     display: grid;
@@ -1848,4 +1888,107 @@ th { color: var(--muted); font-size: .9rem; }
     .exercise-field-split {
         grid-template-columns: 1fr;
     }
+}
+
+
+.profile-header-line {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.profile-avatar-hero {
+    width: 58px;
+    height: 58px;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    font-size: 1.9rem;
+    background: #fff;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+}
+
+.intensity-pill {
+    font-weight: 800;
+}
+
+.intensity-pill.intensity-easy { background: #ecfdf5; color: #047857; }
+.intensity-pill.intensity-medium { background: #eff6ff; color: #1d4ed8; }
+.intensity-pill.intensity-hard { background: #fff7ed; color: #c2410c; }
+
+
+.eye-exercise-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2230;
+    padding: 20px;
+}
+
+.eye-exercise-card {
+    width: min(720px, 100%);
+    background: #ffffff;
+    border-radius: 26px;
+    padding: 24px;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.2);
+    border: 1px solid var(--line);
+}
+
+.eye-exercise-source {
+    margin-top: 6px;
+    font-size: .85rem;
+    color: var(--muted);
+}
+
+.eye-exercise-video-wrap {
+    margin-top: 18px;
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: #000;
+}
+
+.eye-exercise-video-wrap iframe {
+    display: block;
+    width: 100%;
+    min-height: 360px;
+    border: 0;
+}
+
+
+.care-typing-bubble {
+    min-width: 110px;
+}
+
+.care-typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 20px;
+}
+
+.care-typing-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #9fb3a7;
+    opacity: 0.35;
+    animation: careTypingPulse 1s infinite ease-in-out;
+}
+
+.care-typing-dots span:nth-child(2) {
+    animation-delay: 0.18s;
+}
+
+.care-typing-dots span:nth-child(3) {
+    animation-delay: 0.36s;
+}
+
+@keyframes careTypingPulse {
+    0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-2px); }
 }
