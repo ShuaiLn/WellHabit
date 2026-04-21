@@ -16,6 +16,21 @@
     let ending = false;
     let typingVisible = false;
 
+
+    function browserSupportContext() {
+        let timezone = '';
+        try {
+            timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        } catch (error) {
+            timezone = '';
+        }
+        return {
+            browser_locale: navigator.language || '',
+            browser_languages: Array.isArray(navigator.languages) ? navigator.languages.slice(0, 6) : [],
+            browser_timezone: timezone,
+        };
+    }
+
     function saveState() {
         try {
             sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
@@ -199,7 +214,7 @@
             const response = await fetch(config.messageUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: config.sessionId, messages })
+                body: JSON.stringify({ session_id: config.sessionId, messages, ...browserSupportContext() })
             });
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
@@ -207,9 +222,24 @@
             }
             setTypingVisible(false);
             await playAssistantReply(body.assistant_message || 'I\'m here with you.', body.risk_level || 'low');
-            statusEl.textContent = body.risk_level === 'high'
-                ? 'The reply suggested extra real-world support.'
-                : 'The chat will update your scores after it ends.';
+
+            if (body.quick_action && body.quick_action.prompt) {
+                if (body.quick_action.type === 'eye_exercise' && window.WellHabitOpenEyeExercisePrompt) {
+                    window.WellHabitOpenEyeExercisePrompt(body.quick_action.prompt, { forceOverlay: true });
+                    statusEl.textContent = 'Opened the eye exercise prompt for you.';
+                } else if (body.quick_action.type === 'hydration' && window.WellHabitHydrationOpenPrompt) {
+                    window.WellHabitHydrationOpenPrompt(body.quick_action.prompt);
+                    statusEl.textContent = 'Opened the water reminder for you.';
+                } else {
+                    statusEl.textContent = body.risk_level === 'high'
+                        ? 'The reply suggested extra real-world support.'
+                        : 'The chat will update your scores after it ends.';
+                }
+            } else {
+                statusEl.textContent = body.risk_level === 'high'
+                    ? 'The reply suggested extra real-world support.'
+                    : 'The chat will update your scores after it ends.';
+            }
         } catch (error) {
             setTypingVisible(false);
             pushMessage('assistant', 'I hit a problem replying just now, but I\'m still here. Try sending that again in a moment.', 'low');
@@ -227,7 +257,8 @@
 
         const payload = JSON.stringify({
             session_id: config.sessionId,
-            messages
+            messages,
+            ...browserSupportContext()
         });
 
         if (useBeacon && navigator.sendBeacon) {

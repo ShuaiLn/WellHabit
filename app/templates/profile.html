@@ -126,6 +126,25 @@
                     </article>
                 {% endfor %}
             </div>
+            {% if hydration_goal_plan %}
+                <div class="profile-note-box hydration-auto-plan-box">
+                    <p class="muted small">{{ hydration_goal_plan.preview_text }}</p>
+                    {% if hydration_goal_plan.extra_rows %}
+                        <div class="compact-progress-stack hydration-schedule-list">
+                            {% for row in hydration_goal_plan.extra_rows %}
+                                <article class="wellness-row compact-progress-row">
+                                    <div class="wellness-row-head compact-progress-head">
+                                        <strong>{{ row.label }}</strong>
+                                        <span>{{ row.display_time }}</span>
+                                    </div>
+                                </article>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="muted small">No extra water reminders are needed right now.</p>
+                    {% endif %}
+                </div>
+            {% endif %}
             <form method="post" class="goal-editor-form hydration-time-form">
                 <input type="hidden" name="action" value="update_hydration_schedule">
                 {% for row in hydration_schedule_rows %}
@@ -134,7 +153,7 @@
                         <input type="time" name="{{ row.field_name }}" value="{{ row.time_text }}">
                     </label>
                 {% endfor %}
-                <p class="muted small">These are your only automatic water reminders: wake-up, breakfast, lunch, and dinner.</p>
+                <p class="muted small">These four times are anchor reminders. WellHabit can also place extra water reminders later in the day when your remaining goal will not be covered by the anchor glasses alone.</p>
                 <button class="btn secondary full-width" type="submit">Update water reminder times</button>
             </form>
         </div>

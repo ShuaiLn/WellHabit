@@ -48,3 +48,15 @@ For safer local configuration, you can also set a secret key and enable debug on
 setx FLASK_SECRET_KEY "your_long_random_secret"
 setx FLASK_DEBUG "1"
 ```
+
+
+## Care AI boundaries and support
+
+WellHabit's Care AI is designed for habit support.
+
+- This is habit support, not medical advice.
+- Wellness scores are behavioral estimates, not clinical metrics.
+- Care AI is not therapy.
+- If emotions feel high-risk or unsafe, contact real-person support now.
+
+The Care AI screen shows these limits in the UI, and when a care chat ends on a negative tone the app can also show a region-matched crisis support contact based on the browser's locale/time zone when available.

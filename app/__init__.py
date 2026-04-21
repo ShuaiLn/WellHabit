@@ -88,9 +88,15 @@ def run_lightweight_migrations(app: Flask) -> None:
             _ensure_column(cursor, 'task', 'completed_at', 'completed_at DATETIME')
             _ensure_column(cursor, 'task', 'task_type', "task_type VARCHAR(30) NOT NULL DEFAULT 'regular'")
             _ensure_column(cursor, 'task', 'auto_tracked_water_ml', 'auto_tracked_water_ml INTEGER NOT NULL DEFAULT 0')
+            _ensure_column(cursor, 'task', 'ai_generated_source', 'ai_generated_source VARCHAR(30)')
+            _ensure_column(cursor, 'task', 'ai_suggestion_key', 'ai_suggestion_key VARCHAR(40)')
+            _ensure_column(cursor, 'task', 'ai_followup_question', 'ai_followup_question VARCHAR(240)')
+            _ensure_column(cursor, 'task', 'ai_followup_rating', 'ai_followup_rating INTEGER')
+            _ensure_column(cursor, 'task', 'ai_followup_completed_at', 'ai_followup_completed_at DATETIME')
             cursor.execute('UPDATE task SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0')
             cursor.execute("UPDATE task SET task_type = 'regular' WHERE task_type IS NULL OR task_type = ''")
             _ensure_index(cursor, 'ix_task_user_date_sort', 'CREATE INDEX IF NOT EXISTS ix_task_user_date_sort ON task (user_id, task_date, sort_order)')
+            _ensure_index(cursor, 'ix_task_ai_suggestion_lookup', 'CREATE INDEX IF NOT EXISTS ix_task_ai_suggestion_lookup ON task (user_id, task_type, ai_suggestion_key, completed, created_at)')
 
         if 'calendar_event' not in tables:
             cursor.execute(

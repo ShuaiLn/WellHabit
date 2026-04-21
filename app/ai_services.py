@@ -487,7 +487,33 @@ def _care_text_flags(text: str) -> dict[str, Any]:
 
 
 
-def _care_micro_action(wellness_scores: dict[str, Any] | None, flags: dict[str, Any]) -> str:
+def _preferred_intervention_action(intervention_context: dict[str, Any] | None) -> str | None:
+    context = intervention_context or {}
+    preferred = context.get('preferred_candidate') or {}
+    if not isinstance(preferred, dict):
+        return None
+    action = str(preferred.get('chat_action') or '').strip()
+    if action:
+        return action
+    title = str(preferred.get('title') or '').strip()
+    description = str(preferred.get('description') or '').strip()
+    if title and description:
+        return f"{title}. {description}"
+    if title:
+        return title
+    return None
+
+
+
+def _care_micro_action(
+    wellness_scores: dict[str, Any] | None,
+    flags: dict[str, Any],
+    intervention_context: dict[str, Any] | None = None,
+) -> str:
+    preferred_action = _preferred_intervention_action(intervention_context)
+    if preferred_action:
+        return preferred_action
+
     scores = wellness_scores or {}
     hydration = int(scores.get('hydration') or scores.get('hydration_score') or 50)
     energy = int(scores.get('energy') or scores.get('energy_score') or 50)
@@ -508,12 +534,144 @@ def _care_micro_action(wellness_scores: dict[str, Any] | None, flags: dict[str, 
 
 
 
-def _fallback_care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+NEGATIVE_MOOD_KEYS = {'sad', 'anxious', 'exhausted', 'stressed', 'overwhelmed'}
+
+
+
+def recommend_micro_intervention(
+    context_text: str,
+    detected_mood: str | None = None,
+    wellness_scores: dict[str, Any] | None = None,
+    intervention_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cleaned = (context_text or '').strip()
+    normalized_mood = _normalize_mood_key(detected_mood)
+    if normalized_mood in {'custom', 'mixed', 'normal', 'happy', 'calm', 'hopeful'}:
+        normalized_mood = None
+
+    preferred = (intervention_context or {}).get('preferred_candidate') or {}
+    if isinstance(preferred, dict) and preferred.get('title'):
+        return {
+            'title': str(preferred.get('title') or '').strip()[:200],
+            'description': str(preferred.get('description') or '').strip()[:400],
+            'follow_up_question': str(preferred.get('follow_up_question') or '').strip()[:200] or 'After doing this, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': str(preferred.get('reason') or 'Ranked highest from the personalized intervention system.')[:240],
+            'source': 'personalized_ranking',
+            'suggestion_key': str(preferred.get('key') or '').strip()[:40] or None,
+        }
+
+    client = _get_openai_client()
+    if client and cleaned:
+        try:
+            model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
+            response = client.responses.create(
+                model=model_name,
+                input=(
+                    'Create one very small wellness micro-intervention todo for a student after negativity was detected. '
+                    'Return ONLY valid JSON with title, description, follow_up_question, reason, and suggestion_key. '
+                    'Rules: the title must be imperative, under 60 characters, concrete, and suitable for a todo list. '
+                    'The description must be 1 short sentence, warm, and actionable. '
+                    'Prefer breathing, grounding, a short reset, a tiny next step, hydration, or a gentle walk. '
+                    'If personalized ranking context is provided, keep the suggestion aligned to the top ranked option unless the context clearly makes it inappropriate. '
+                    'Avoid therapy language, medical claims, and anything long or vague. '
+                    f'Detected mood hint: {normalized_mood or "none"}. '
+                    f'Wellness scores: {json.dumps(wellness_scores or {}, ensure_ascii=False)}. '
+                    f'Intervention context: {json.dumps(intervention_context or {}, ensure_ascii=False)}. '
+                    f'Context: {cleaned[:1200]}'
+                ),
+            )
+            raw_text = (response.output_text or '').strip()
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            payload = json.loads(match.group(0) if match else raw_text)
+            title = str(payload.get('title') or '').strip()[:200]
+            description = str(payload.get('description') or '').strip()[:400]
+            follow_up_question = str(payload.get('follow_up_question') or '').strip()[:200]
+            reason = str(payload.get('reason') or '').strip()[:200]
+            suggestion_key = str(payload.get('suggestion_key') or '').strip()[:40]
+            if title and description:
+                return {
+                    'title': title,
+                    'description': description,
+                    'follow_up_question': follow_up_question or 'After doing this, how much better do you feel out of 10 regarding the negativity detected earlier?',
+                    'reason': reason or 'AI picked one concrete reset step.',
+                    'source': 'ai',
+                    'suggestion_key': suggestion_key or None,
+                }
+        except Exception:
+            pass
+
+    flags = _care_text_flags(cleaned)
+    scores = wellness_scores or {}
+    hydration = int(scores.get('hydration') or scores.get('hydration_score') or 50)
+    energy = int(scores.get('energy') or scores.get('energy_score') or 50)
+    focus = int(scores.get('focus') or scores.get('focus_score') or 50)
+
+    if flags.get('high_distress') or normalized_mood in {'anxious', 'overwhelmed', 'stressed'}:
+        return {
+            'title': 'Do a 2-minute breathing reset',
+            'description': 'AI suggestion after negativity was detected: sit down, loosen your shoulders, and take slow breaths for 2 minutes.',
+            'follow_up_question': 'After the breathing reset, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': 'Stress or overwhelm cues were strongest.',
+            'source': 'fallback',
+            'suggestion_key': 'breathing_2min',
+        }
+    if normalized_mood == 'exhausted' or energy <= min(hydration, focus, 45):
+        return {
+            'title': 'Take a 5-minute quiet reset',
+            'description': 'AI suggestion after negativity was detected: step away, rest your eyes, and let your body settle for 5 minutes.',
+            'follow_up_question': 'After the quiet reset, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': 'Low-energy cues were strongest.',
+            'source': 'fallback',
+            'suggestion_key': 'quiet_reset_5min',
+        }
+    if normalized_mood == 'sad':
+        return {
+            'title': 'Write one kind line to yourself',
+            'description': 'AI suggestion after negativity was detected: write one short, kind sentence to yourself and breathe once before moving on.',
+            'follow_up_question': 'After writing that line, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': 'Sadness cues were strongest.',
+            'source': 'fallback',
+            'suggestion_key': 'kind_line_self',
+        }
+    if hydration < 40:
+        return {
+            'title': 'Drink one glass of water slowly',
+            'description': 'AI suggestion after negativity was detected: drink one glass of water slowly and notice whether your body feels a little steadier.',
+            'follow_up_question': 'After drinking the water, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': 'Hydration looked lowest.',
+            'source': 'fallback',
+            'suggestion_key': 'drink_water_glass',
+        }
+    if focus < 45:
+        return {
+            'title': 'Do one tiny next step',
+            'description': 'AI suggestion after negativity was detected: choose one next step that takes under 3 minutes and do only that.',
+            'follow_up_question': 'After that tiny step, how much better do you feel out of 10 regarding the negativity detected earlier?',
+            'reason': 'Focus looked lowest.',
+            'source': 'fallback',
+            'suggestion_key': 'tiny_next_step',
+        }
+    return {
+        'title': 'Take a 3-minute reset walk',
+        'description': 'AI suggestion after negativity was detected: stand up, walk for 3 minutes, and come back with a slower breath.',
+        'follow_up_question': 'After the reset walk, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'reason': 'A gentle reset fit best.',
+        'source': 'fallback',
+        'suggestion_key': 'reset_walk_3min',
+    }
+
+
+
+def _fallback_care_chat_reply(
+    messages: list[dict[str, str]],
+    wellness_scores: dict[str, Any] | None = None,
+    intervention_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     transcript = '\n'.join(f"{(item.get('role') or 'user')}: {(item.get('content') or '').strip()}" for item in messages[-10:])
     last_user = next((item for item in reversed(messages) if (item.get('role') or '').lower() == 'user' and (item.get('content') or '').strip()), {})
     user_text = (last_user.get('content') or '').strip()
     flags = _care_text_flags(f"{transcript}\n{user_text}")
-    action = _care_micro_action(wellness_scores, flags)
+    action = _care_micro_action(wellness_scores, flags, intervention_context=intervention_context)
 
     if flags['high_distress']:
         reply = (
@@ -550,7 +708,11 @@ def _fallback_care_chat_reply(messages: list[dict[str, str]], wellness_scores: d
         'risk_level': risk,
         'source': 'fallback',
     }
-def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
+def care_chat_reply(
+    messages: list[dict[str, str]],
+    wellness_scores: dict[str, Any] | None = None,
+    intervention_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     cleaned_messages = []
     for item in messages or []:
         role = (item.get('role') or '').strip().lower()
@@ -560,11 +722,11 @@ def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, A
         cleaned_messages.append({'role': role, 'content': content[:1200]})
 
     if not cleaned_messages:
-        return _fallback_care_chat_reply([], wellness_scores)
+        return _fallback_care_chat_reply([], wellness_scores, intervention_context=intervention_context)
 
     client = _get_openai_client()
     if not client:
-        return _fallback_care_chat_reply(cleaned_messages, wellness_scores)
+        return _fallback_care_chat_reply(cleaned_messages, wellness_scores, intervention_context=intervention_context)
 
     try:
         model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
@@ -576,12 +738,14 @@ def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, A
                 'Keep the reply supportive but practical, usually 2 to 5 short sentences.',
                 'Use the wellness scores as quiet context. Mention them only when naturally helpful.',
                 'Validate the feeling first, then offer one small concrete next step.',
+                'When intervention_context.preferred_candidate is present, treat that as the backend-preferred next step unless the latest user message clearly makes it inappropriate.',
                 'Prefer short, natural sentences that can be shown one by one in chat.',
                 'Do not pretend to replace a close friend, therapist, doctor, or emergency help.',
                 'If the user sounds intensely distressed, unsafe, or close to panic, say clearly that AI text may not be enough and encourage reaching a trusted person or local emergency support now.',
                 'Avoid empty praise and avoid repeating the same sentence patterns.',
             ],
             'wellness_scores': wellness_scores or {},
+            'intervention_context': intervention_context or {},
             'recent_messages': cleaned_messages[-10:],
             'output_schema': {
                 'reply': 'string',
@@ -604,7 +768,7 @@ def care_chat_reply(messages: list[dict[str, str]], wellness_scores: dict[str, A
             'source': 'ai',
         }
     except Exception:
-        return _fallback_care_chat_reply(cleaned_messages, wellness_scores)
+        return _fallback_care_chat_reply(cleaned_messages, wellness_scores, intervention_context=intervention_context)
 
 def _care_topic_summary(messages: list[dict[str, str]]) -> str:
     user_lines = [re.sub(r'\s+', ' ', (item.get('content') or '').strip()) for item in messages if (item.get('role') or '').lower() == 'user' and (item.get('content') or '').strip()]

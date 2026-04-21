@@ -35,7 +35,13 @@
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return null;
             const parsed = JSON.parse(raw);
-            if (!parsed || !parsed.id) {
+            if (!parsed || !parsed.id || !parsed.due_at_iso) {
+                localStorage.removeItem(STORAGE_KEY);
+                return null;
+            }
+            const dueAt = new Date(parsed.due_at_iso);
+            const ageMs = Date.now() - dueAt.getTime();
+            if (Number.isNaN(dueAt.getTime()) || ageMs > 75 * 60 * 1000 || ageMs < -12 * 60 * 60 * 1000) {
                 localStorage.removeItem(STORAGE_KEY);
                 return null;
             }
@@ -233,7 +239,22 @@
             amountEl.value = '';
             customEl.value = '';
             closePrompt();
-            window.location.reload();
+
+            if (body.avatar_emoji && window.WellHabitSetAvatarEmoji) {
+                window.WellHabitSetAvatarEmoji(body.avatar_emoji);
+            }
+            if (body.wellness_feedback && window.WellHabitShowWellnessFeedback) {
+                window.WellHabitShowWellnessFeedback(
+                    body.wellness_feedback,
+                    { reloadOnClose: Boolean(window.location.pathname.includes('/dashboard')) }
+                );
+            } else if (window.location.pathname.includes('/dashboard')) {
+                window.location.reload();
+                return;
+            }
+
+            await refreshPromptState();
+            document.dispatchEvent(new CustomEvent('wellhabit:hydration-saved', { detail: body }));
             return;
         } catch (error) {
             console.error('Hydration response failed', error);
@@ -258,11 +279,6 @@
     finishedBtn.addEventListener('click', () => sendResponse('done'));
     notYetBtn.addEventListener('click', () => sendResponse('not_yet'));
     skipBtn.addEventListener('click', () => sendResponse('skipped'));
-
-    const stored = restoreStoredPrompt();
-    if (stored) {
-        openPrompt(stored, stored.prompt_type || 'scheduled_wake', { skipSeenMark: true });
-    }
 
     if (config.due && !hasSeenPrompt(config.due)) {
         openPrompt(config.due, config.due.prompt_type);

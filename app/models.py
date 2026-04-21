@@ -95,6 +95,11 @@ class Task(db.Model):
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     completed_at = db.Column(db.DateTime)
     auto_tracked_water_ml = db.Column(db.Integer, nullable=False, default=0)
+    ai_generated_source = db.Column(db.String(30))
+    ai_suggestion_key = db.Column(db.String(40))
+    ai_followup_question = db.Column(db.String(240))
+    ai_followup_rating = db.Column(db.Integer)
+    ai_followup_completed_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 

@@ -1144,6 +1144,23 @@ th { color: var(--muted); font-size: .9rem; }
     color: var(--muted);
 }
 
+.task-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    width: fit-content;
+}
+.ai-suggestion-badge {
+    background: #ede9fe;
+    color: #6d28d9;
+    border: 1px solid #ddd6fe;
+}
+
 
 .sleep-reminder-overlay {
     position: fixed;
@@ -1991,4 +2008,86 @@ th { color: var(--muted); font-size: .9rem; }
 @keyframes careTypingPulse {
     0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
     40% { opacity: 1; transform: translateY(-2px); }
+}
+
+
+.ai-suggestion-followup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.48);
+    display: grid;
+    place-items: center;
+    z-index: 1200;
+    padding: 20px;
+}
+
+.ai-suggestion-followup-card {
+    width: min(560px, 100%);
+    background: #ffffff;
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 30px 60px rgba(15, 23, 42, 0.18);
+    border: 1px solid #e9d5ff;
+}
+
+.ai-suggestion-rating-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.ai-rating-btn {
+    min-height: 48px;
+    font-weight: 700;
+}
+
+@media (max-width: 640px) {
+    .ai-suggestion-rating-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.ai-suggestion-added-card h2 { margin-bottom: 8px; }
+.ai-suggestion-added-card .muted { margin-bottom: 0; }
+
+
+.care-boundary-callout {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 14px 16px;
+    background: #f8fbf9;
+}
+
+.care-boundary-list,
+.wellness-feedback-boundary-list {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 6px;
+}
+
+.care-boundary-list li,
+.wellness-feedback-boundary-list li {
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+.wellness-feedback-boundary-box,
+.wellness-feedback-support-box {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 14px 16px;
+    background: #f8fbf9;
+}
+
+.wellness-feedback-support-box {
+    border-color: #f2d6d6;
+    background: #fff7f7;
+}
+
+.wellness-feedback-support-box p {
+    margin: 6px 0 0;
 }

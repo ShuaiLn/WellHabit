@@ -19,6 +19,7 @@ from .ai_services import (
     convert_drink_amount_to_ml,
     mood_display_label,
     mood_value_for_label,
+    recommend_micro_intervention,
     suggest_personal_goals,
     summarize_care_chat_session,
     update_wellness_scores,
@@ -27,9 +28,71 @@ from .models import ActivityEntry, CalendarEvent, DailyLog, EyeExercisePrompt, E
 
 LOCAL_TZ = ZoneInfo('America/Los_Angeles')
 GLASS_VOLUME_ML = 250
+HYDRATION_DUE_GRACE_MINUTES = 75
+HYDRATION_EXTRA_MIN_GAP_MINUTES = 45
 EYE_EXERCISE_THRESHOLD_MINUTES = 25
 EYE_EXERCISE_VIDEO_URL = 'https://www.youtube.com/watch?v=iVb4vUp70zY'
 GOAL_INTENSITY_CHOICES = [('easy', 'Easy'), ('medium', 'Medium'), ('hard', 'Hard')]
+
+CARE_BOUNDARY_LINES = [
+    'This is habit support, not medical advice.',
+    'Scores are behavioral estimates, not clinical metrics.',
+    'Care AI is not therapy.',
+    'If emotions feel high-risk or unsafe, contact real-person support now.',
+]
+
+NEGATIVE_CARE_MOOD_LABELS = {'sad', 'anxious', 'stressed', 'exhausted', 'overwhelmed', 'mixed'}
+HIGH_RISK_SUPPORT_HINTS = {
+    'suicide', 'suicidal', 'kill myself', 'want to die', 'self harm', 'self-harm', 'hurt myself',
+    'end my life', 'not safe', 'unsafe', 'panic attack', "can't go on", 'cannot go on', 'hopeless',
+    '轻生', '自杀', '不想活', '伤害自己', '结束生命', '不安全', '撑不住'
+}
+
+CRISIS_SUPPORT_BY_REGION = {
+    'US': {
+        'region_label': 'United States',
+        'service_name': '988 Suicide & Crisis Lifeline',
+        'contact_line': 'Call or text: 988',
+        'chat_line': 'Chat: 988lifeline.org',
+        'urgent_line': 'If there is immediate danger, call 911.',
+    },
+    'CA': {
+        'region_label': 'Canada',
+        'service_name': '9-8-8 Suicide Crisis Helpline',
+        'contact_line': 'Call or text: 9-8-8',
+        'chat_line': 'More help: 988.ca',
+        'urgent_line': 'If there is immediate danger, call 911.',
+    },
+    'GB': {
+        'region_label': 'United Kingdom',
+        'service_name': 'Samaritans',
+        'contact_line': 'Call: 116 123',
+        'chat_line': 'More help: samaritans.org',
+        'urgent_line': 'If there is immediate danger, call 999.',
+    },
+    'IE': {
+        'region_label': 'Ireland',
+        'service_name': 'Samaritans',
+        'contact_line': 'Call: 116 123',
+        'chat_line': 'More help: samaritans.org/samaritans-ireland',
+        'urgent_line': 'If there is immediate danger, call 112 or 999.',
+    },
+    'AU': {
+        'region_label': 'Australia',
+        'service_name': 'Lifeline',
+        'contact_line': 'Call: 13 11 14 · Text: 0477 13 11 14',
+        'chat_line': 'More help: lifeline.org.au',
+        'urgent_line': 'If there is immediate danger, call 000.',
+    },
+    'NZ': {
+        'region_label': 'New Zealand',
+        'service_name': 'Lifeline Aotearoa / Suicide Crisis Helpline',
+        'contact_line': 'Call: 0800 543 354 · Text: 4357 · Suicide Crisis Helpline: 0508 828 865',
+        'chat_line': 'More help: lifeline.org.nz',
+        'urgent_line': 'If there is immediate danger, call 111.',
+    },
+}
+
 
 WELLNESS_META = [
     ('hydration', 'Hydration', 'Water goal progress'),
@@ -95,6 +158,45 @@ MOOD_COLOR_MAP = {
     'mixed': '#8b5cf6',
     'custom': '#64748b',
 }
+
+NEGATIVE_MOOD_LABELS = {'sad', 'anxious', 'exhausted', 'stressed', 'overwhelmed'}
+
+CARE_WATER_INTENT_PATTERNS = [
+    r'\bi want to drink water\b',
+    r'\bi need water\b',
+    r'\bi need to drink\b',
+    r'\bi should drink water\b',
+    r'\blet me drink water\b',
+    r'\bgo drink water\b',
+    r'\bdrink some water\b',
+    r'\bhave some water\b',
+    r'\bremind me to drink water\b',
+    r'\bi am thirsty\b',
+    r'想喝水',
+    r'我要喝水',
+    r'我想喝水',
+    r'去喝水',
+    r'喝点水',
+    r'提醒我喝水',
+    r'口渴',
+]
+
+CARE_EYE_EXERCISE_INTENT_PATTERNS = [
+    r'\bi want to do an eye exercise\b',
+    r'\bi want to do eye exercises\b',
+    r'\bi need an eye break\b',
+    r'\bi need to rest my eyes\b',
+    r'\bmy eyes are tired\b',
+    r'\bmy eyes hurt\b',
+    r'\bdo an eye exercise\b',
+    r'\brest my eyes\b',
+    r'\beye exercise\b',
+    r'眼保健操',
+    r'休息眼睛',
+    r'眼睛累',
+    r'眼睛酸',
+    r'护眼',
+]
 
 
 EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
@@ -198,6 +300,629 @@ def _record_mood_entry(user_id: int, source: str, mood_label: str | None, custom
     db.session.add(mood_entry)
     db.session.flush()
     return mood_entry
+
+
+def _mood_is_negative(mood_label: str | None, custom_text: str | None = None) -> bool:
+    normalized, custom_clean = _normalize_mood_choice(mood_label, custom_text)
+    if normalized == 'custom' and custom_clean:
+        analysis = analyze_text_mood(custom_clean, preferred=custom_clean)
+        normalized = _normalize_mood_choice(analysis.get('mood_label'), '')[0]
+    return normalized in NEGATIVE_MOOD_LABELS
+
+
+
+AI_INTERVENTION_HISTORY_DAYS = 45
+AI_INTERVENTION_COOLDOWN_MINUTES = 60
+AI_INTERVENTION_STALE_HOURS = 8
+AI_INTERVENTION_RECENT_POMODORO_MINUTES = 20
+
+AI_INTERVENTION_CATALOG = {
+    'breathing_1min': {
+        'title': 'Do a 1-minute breathing reset',
+        'description': 'Sit down, loosen your shoulders, and take five slow breaths.',
+        'follow_up_question': 'After the 1-minute breathing reset, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Try a 1-minute breathing reset: loosen your shoulders and take five slow breaths.',
+    },
+    'quiet_reset_5min': {
+        'title': 'Take a 5-minute quiet reset',
+        'description': 'Step away for 5 minutes, rest your eyes, and let your body settle a little.',
+        'follow_up_question': 'After the quiet reset, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Take a 5-minute quiet reset: step away, rest your eyes, and let your body settle a little.',
+    },
+    'drink_water_glass': {
+        'title': 'Drink one glass of water slowly',
+        'description': 'Drink one glass of water slowly and notice whether your body feels a bit steadier.',
+        'follow_up_question': 'After drinking the water, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Drink one glass of water slowly, then notice whether your body feels even a little steadier.',
+    },
+    'eye_reset_2min': {
+        'title': 'Do a 2-minute eye reset',
+        'description': 'Look away from the screen, blink slowly, and rest your eyes for 2 minutes.',
+        'follow_up_question': 'After the eye reset, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Do a 2-minute eye reset: look away from the screen, blink slowly, and rest your eyes.',
+    },
+    'stretch_2min': {
+        'title': 'Do a 2-minute stretch break',
+        'description': 'Stand up, roll your shoulders, and stretch your neck and back for 2 minutes.',
+        'follow_up_question': 'After the stretch break, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Take a 2-minute stretch break: stand up, roll your shoulders, and loosen your neck and back.',
+    },
+    'tiny_next_step': {
+        'title': 'Do one tiny next step',
+        'description': 'Pick one next step that takes under 3 minutes and do only that.',
+        'follow_up_question': 'After that tiny next step, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Pick one next step that takes under 3 minutes and do only that one thing.',
+    },
+    'reset_walk_3min': {
+        'title': 'Take a 3-minute reset walk',
+        'description': 'Stand up, walk for 3 minutes, and come back with a slower breath.',
+        'follow_up_question': 'After the reset walk, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Take a 3-minute reset walk, then come back with a slower breath.',
+    },
+    'kind_line_self': {
+        'title': 'Write one kind line to yourself',
+        'description': 'Write one short, kind sentence to yourself before you move on.',
+        'follow_up_question': 'After writing that kind line, how much better do you feel out of 10 regarding the negativity detected earlier?',
+        'chat_action': 'Write one short, kind sentence to yourself before you move on.',
+    },
+}
+
+
+def _normalize_ai_text(value: str | None) -> str:
+    return re.sub(r'\s+', ' ', (value or '').strip().lower())
+
+
+
+def _infer_ai_suggestion_key_from_text(title: str | None, description: str | None = None) -> str:
+    text = _normalize_ai_text(' '.join(part for part in [title or '', description or ''] if part))
+    if 'breath' in text or '呼吸' in text:
+        return 'breathing_1min'
+    if 'quiet reset' in text or 'rest your eyes' in text or 'quiet' in text:
+        return 'quiet_reset_5min'
+    if 'glass of water' in text or 'drink' in text or '喝水' in text:
+        return 'drink_water_glass'
+    if 'eye reset' in text or 'eye exercise' in text or '眼' in text:
+        return 'eye_reset_2min'
+    if 'stretch' in text or '拉伸' in text:
+        return 'stretch_2min'
+    if 'tiny next step' in text or 'under 3 minutes' in text:
+        return 'tiny_next_step'
+    if 'walk' in text or '散步' in text:
+        return 'reset_walk_3min'
+    if 'kind line' in text or 'kind sentence' in text or '写一句' in text:
+        return 'kind_line_self'
+    return 'tiny_next_step'
+
+
+
+def _task_ai_suggestion_key(task: Task | None) -> str | None:
+    if not task:
+        return None
+    stored = _clean_text(getattr(task, 'ai_suggestion_key', None), 40)
+    if stored:
+        return stored
+    return _infer_ai_suggestion_key_from_text(getattr(task, 'title', None), getattr(task, 'description', None))
+
+
+
+def _serialize_ai_suggestion_from_task(task: Task | None) -> dict | None:
+    if not task:
+        return None
+    key = _task_ai_suggestion_key(task)
+    template = AI_INTERVENTION_CATALOG.get(key or '', {})
+    return {
+        'key': key,
+        'title': task.title,
+        'description': task.description or template.get('description') or '',
+        'follow_up_question': task.ai_followup_question or template.get('follow_up_question') or '',
+        'reason': f'Existing unfinished AI suggestion ({key or "custom"}).',
+        'chat_action': template.get('chat_action') or task.title,
+    }
+
+
+
+def _build_ai_intervention_history(user_id: int, now: datetime | None = None) -> dict[str, dict]:
+    current_dt = (now or local_now()).replace(tzinfo=None)
+    start_dt = current_dt - timedelta(days=AI_INTERVENTION_HISTORY_DAYS)
+    rows = Task.query.filter(
+        Task.user_id == user_id,
+        Task.task_type == 'ai_suggestion',
+        Task.created_at >= start_dt,
+    ).order_by(Task.created_at.desc()).all()
+
+    history: dict[str, dict] = {}
+    for row in rows:
+        key = _task_ai_suggestion_key(row)
+        if not key:
+            continue
+        bucket = history.setdefault(key, {
+            'suggested_count': 0,
+            'completed_count': 0,
+            'rated_count': 0,
+            'rating_total': 0,
+            'stale_open_count': 0,
+            'last_rating': None,
+            'last_suggested_at': None,
+            'last_completed_at': None,
+        })
+        bucket['suggested_count'] += 1
+        if not bucket['last_suggested_at']:
+            bucket['last_suggested_at'] = row.created_at
+        if row.completed:
+            bucket['completed_count'] += 1
+            if row.completed_at and not bucket['last_completed_at']:
+                bucket['last_completed_at'] = row.completed_at
+        if row.ai_followup_rating is not None:
+            bucket['rated_count'] += 1
+            bucket['rating_total'] += int(row.ai_followup_rating)
+            if bucket['last_rating'] is None:
+                bucket['last_rating'] = int(row.ai_followup_rating)
+        if (not row.completed) and row.created_at <= current_dt - timedelta(hours=AI_INTERVENTION_STALE_HOURS):
+            bucket['stale_open_count'] += 1
+
+    for key, bucket in history.items():
+        suggested = max(1, int(bucket['suggested_count']))
+        completed = int(bucket['completed_count'])
+        rated = int(bucket['rated_count'])
+        stale_open = int(bucket['stale_open_count'])
+        avg_rating = (float(bucket['rating_total']) / rated) if rated else None
+        completion_rate = completed / suggested
+        profile_score = 0.0
+        if avg_rating is not None:
+            profile_score += (avg_rating - 5.5) * 1.6
+        elif completed:
+            profile_score += min(2.0, completed * 0.35)
+        profile_score += (completion_rate - 0.45) * 2.5
+        profile_score -= stale_open * 2.0
+        if bucket.get('last_rating') is not None and int(bucket['last_rating']) >= 7:
+            profile_score += 0.8
+        bucket['avg_rating'] = round(avg_rating, 2) if avg_rating is not None else None
+        bucket['completion_rate'] = round(completion_rate, 2)
+        bucket['profile_score'] = max(-6.0, min(6.0, round(profile_score, 2)))
+    return history
+
+
+
+def _recent_ai_prompt_signals(user_id: int, now: datetime | None = None) -> dict[str, bool]:
+    current_dt = (now or local_now()).replace(tzinfo=None)
+    since = current_dt - timedelta(minutes=AI_INTERVENTION_COOLDOWN_MINUTES)
+    recent_hydration = HydrationPrompt.query.filter(
+        HydrationPrompt.user_id == user_id,
+        HydrationPrompt.due_at >= since,
+    ).count() > 0
+    recent_eye = EyeExercisePrompt.query.filter(
+        EyeExercisePrompt.user_id == user_id,
+        EyeExercisePrompt.due_at >= since,
+    ).count() > 0
+    recent_pomodoro = PomodoroSession.query.filter(
+        PomodoroSession.user_id == user_id,
+        PomodoroSession.completed_at >= current_dt - timedelta(minutes=AI_INTERVENTION_RECENT_POMODORO_MINUTES),
+    ).order_by(PomodoroSession.completed_at.desc()).first()
+    return {
+        'hydration_prompt_recent': recent_hydration,
+        'eye_prompt_recent': recent_eye,
+        'recent_pomodoro': recent_pomodoro is not None,
+    }
+
+
+
+def _rank_personalized_interventions(
+    user: User,
+    context_text: str,
+    detected_mood: str | None = None,
+    target_date: date | None = None,
+) -> dict:
+    cleaned = _clean_text(context_text, 3000)
+    lowered = _normalize_ai_text(cleaned)
+    chosen_date = target_date or local_today()
+    current_dt = local_now().replace(tzinfo=None)
+    scores = _score_snapshot(user)
+    hydration = int(scores.get('hydration') or 50)
+    energy = int(scores.get('energy') or 50)
+    focus = int(scores.get('focus') or 50)
+    mood = int(scores.get('mood') or 50)
+
+    mood_hint = _normalize_mood_choice(detected_mood, '')[0] if detected_mood else ''
+    if not mood_hint and cleaned:
+        mood_hint = _normalize_mood_choice(analyze_text_mood(cleaned, preferred='').get('mood_label'), '')[0]
+
+    history = _build_ai_intervention_history(user.id, current_dt)
+    prompt_signals = _recent_ai_prompt_signals(user.id, current_dt)
+    active_tasks = Task.query.filter_by(user_id=user.id, task_type='ai_suggestion', completed=False).order_by(Task.created_at.desc()).all()
+    active_same_day = next((task for task in active_tasks if task.task_date == chosen_date), None)
+    active_keys = {_task_ai_suggestion_key(task) for task in active_tasks if _task_ai_suggestion_key(task)}
+    recent_rows = Task.query.filter(
+        Task.user_id == user.id,
+        Task.task_type == 'ai_suggestion',
+        Task.created_at >= current_dt - timedelta(minutes=AI_INTERVENTION_COOLDOWN_MINUTES),
+    ).all()
+    recent_keys = {_task_ai_suggestion_key(row) for row in recent_rows if _task_ai_suggestion_key(row)}
+
+    flags = {
+        'anxious': mood_hint in {'anxious', 'stressed', 'overwhelmed'} or any(token in lowered for token in ['anxious', 'stress', 'stressed', 'panic', 'overwhelmed', '焦虑', '压力', '紧张', '崩溃']),
+        'sad': mood_hint == 'sad' or any(token in lowered for token in ['sad', 'down', 'lonely', 'cry', '难过', '伤心']),
+        'exhausted': mood_hint == 'exhausted' or any(token in lowered for token in ['tired', 'exhausted', 'drained', 'burned out', 'sleepy', '累', '疲劳', '没力气']),
+        'overwhelmed': mood_hint in {'overwhelmed', 'stressed'} or any(token in lowered for token in ['too much', 'behind', 'deadline', "can't keep up", '压得', '来不及']),
+        'thirsty': any(token in lowered for token in ['thirsty', 'drink water', 'need water', '喝水', '口渴']),
+        'eyes': any(token in lowered for token in ['eye', 'eyes', 'screen', 'headache', 'vision', '眼', '屏幕']),
+        'school': any(token in lowered for token in ['study', 'school', 'homework', 'exam', 'assignment', 'class', '学习', '作业', '考试']),
+        'restless': any(token in lowered for token in ['angry', 'frustrated', 'restless', 'stuck', '烦', '生气', '坐不住']),
+        'self_critical': any(token in lowered for token in ['my fault', 'hate myself', 'useless', 'worthless', 'I failed', '自责', '没用']),
+    }
+
+    candidates = []
+    for key, template in AI_INTERVENTION_CATALOG.items():
+        score = 0.0
+        reasons = []
+
+        if key == 'breathing_1min':
+            if flags['anxious']:
+                score += 6.0
+                reasons.append('stress/anxiety signal')
+            if mood < 45:
+                score += 1.2
+                reasons.append('mood is low')
+        elif key == 'quiet_reset_5min':
+            if flags['exhausted'] or energy < 45:
+                score += 5.5
+                reasons.append('energy looks low')
+            if flags['eyes']:
+                score += 1.0
+                reasons.append('eyes may need rest')
+        elif key == 'drink_water_glass':
+            if flags['thirsty']:
+                score += 6.0
+                reasons.append('the user asked for water')
+            if hydration < 42:
+                score += 4.5
+                reasons.append('hydration looks low')
+            elif hydration < 55:
+                score += 2.0
+                reasons.append('hydration is below steady range')
+            if prompt_signals['hydration_prompt_recent']:
+                score -= 4.0
+                reasons.append('water was already prompted recently')
+        elif key == 'eye_reset_2min':
+            if flags['eyes']:
+                score += 5.5
+                reasons.append('eye strain or screen cue')
+            if prompt_signals['recent_pomodoro']:
+                score += 2.5
+                reasons.append('just finished focused work')
+            if prompt_signals['eye_prompt_recent']:
+                score -= 4.0
+                reasons.append('eye exercise was already prompted recently')
+        elif key == 'stretch_2min':
+            if prompt_signals['recent_pomodoro']:
+                score += 3.5
+                reasons.append('just finished a pomodoro block')
+            if flags['restless']:
+                score += 1.5
+                reasons.append('body reset may help')
+        elif key == 'tiny_next_step':
+            if flags['overwhelmed'] or flags['school']:
+                score += 5.0
+                reasons.append('the user sounds overwhelmed by tasks')
+            if focus < 46:
+                score += 2.5
+                reasons.append('focus looks low')
+        elif key == 'reset_walk_3min':
+            if flags['restless']:
+                score += 4.5
+                reasons.append('a movement reset may fit better')
+            if energy >= 40:
+                score += 0.8
+                reasons.append('energy is high enough for a short walk')
+        elif key == 'kind_line_self':
+            if flags['sad'] or flags['self_critical']:
+                score += 5.0
+                reasons.append('sadness or self-criticism signal')
+            if mood < 42:
+                score += 1.5
+                reasons.append('mood looks quite low')
+
+        history_entry = history.get(key, {})
+        history_score = float(history_entry.get('profile_score') or 0.0)
+        if history_score:
+            score += history_score
+            reasons.append(f'personal history score {history_score:+.1f}')
+
+        if key in recent_keys:
+            score -= 3.5
+            reasons.append('same intervention was suggested recently')
+        if key in active_keys:
+            score -= 100.0
+            reasons.append('same unfinished suggestion already exists')
+
+        candidates.append({
+            'key': key,
+            'score': round(score, 2),
+            'reason': '; '.join(reasons[:4]) or 'general reset fit',
+            'history': {
+                'avg_rating': history_entry.get('avg_rating'),
+                'completion_rate': history_entry.get('completion_rate'),
+                'profile_score': history_entry.get('profile_score', 0),
+            },
+            **template,
+        })
+
+    candidates.sort(key=lambda item: (item.get('score', 0), item.get('history', {}).get('avg_rating') or 0), reverse=True)
+    preferred = candidates[0] if candidates else None
+    history_rank = sorted(
+        [
+            {
+                'key': key,
+                'avg_rating': value.get('avg_rating'),
+                'completion_rate': value.get('completion_rate'),
+                'profile_score': value.get('profile_score', 0),
+            }
+            for key, value in history.items()
+        ],
+        key=lambda item: (item.get('profile_score') or 0, item.get('avg_rating') or 0),
+        reverse=True,
+    )[:5]
+    return {
+        'preferred_candidate': preferred,
+        'ranked_candidates': candidates[:5],
+        'history_rank': history_rank,
+        'signals': {
+            'hydration': hydration,
+            'energy': energy,
+            'focus': focus,
+            'mood': mood,
+            'mood_hint': mood_hint or None,
+            'recent_pomodoro': prompt_signals['recent_pomodoro'],
+            'hydration_prompt_recent': prompt_signals['hydration_prompt_recent'],
+            'eye_prompt_recent': prompt_signals['eye_prompt_recent'],
+        },
+        'active_same_day_task': active_same_day,
+        'active_keys': sorted(active_keys),
+    }
+
+
+
+
+def _extract_region_from_locale(locale_text: str | None) -> str | None:
+    clean = str(locale_text or '').strip()
+    if not clean:
+        return None
+    for token in re.split(r'[;,\s]+', clean):
+        match = re.search(r'[-_]([A-Za-z]{2})$', token)
+        if not match:
+            match = re.search(r'[-_]([A-Za-z]{2})(?:[^A-Za-z].*)?$', token)
+        if match:
+            region = match.group(1).upper()
+            if region == 'UK':
+                region = 'GB'
+            if region in CRISIS_SUPPORT_BY_REGION:
+                return region
+    return None
+
+
+def _extract_region_from_time_zone(timezone_text: str | None) -> str | None:
+    clean = str(timezone_text or '').strip()
+    if not clean:
+        return None
+    if clean.startswith(('America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'Pacific/Honolulu', 'America/Indiana', 'America/Detroit', 'America/Boise', 'America/Anchorage')):
+        return 'US'
+    if clean.startswith(('America/Toronto', 'America/Vancouver', 'America/Edmonton', 'America/Winnipeg', 'America/Halifax', 'America/St_Johns', 'America/Regina', 'America/Moncton')):
+        return 'CA'
+    if clean.startswith('Europe/London'):
+        return 'GB'
+    if clean.startswith('Europe/Dublin'):
+        return 'IE'
+    if clean.startswith('Australia/'):
+        return 'AU'
+    if clean.startswith(('Pacific/Auckland', 'Pacific/Chatham')):
+        return 'NZ'
+    return None
+
+
+def _resolve_support_region(payload: dict | None = None) -> str | None:
+    payload = payload or {}
+    locale_candidates = []
+    if payload.get('browser_locale'):
+        locale_candidates.append(str(payload.get('browser_locale')))
+    for item in payload.get('browser_languages') or []:
+        if item:
+            locale_candidates.append(str(item))
+    header_locale = request.headers.get('Accept-Language', '') if has_request_context() else ''
+    if header_locale:
+        locale_candidates.append(header_locale)
+
+    for candidate in locale_candidates:
+        region = _extract_region_from_locale(candidate)
+        if region:
+            return region
+
+    timezone_candidates = []
+    if payload.get('browser_timezone'):
+        timezone_candidates.append(str(payload.get('browser_timezone')))
+    if has_request_context():
+        header_tz = request.headers.get('Time-Zone') or request.headers.get('X-Time-Zone')
+        if header_tz:
+            timezone_candidates.append(str(header_tz))
+
+    for candidate in timezone_candidates:
+        region = _extract_region_from_time_zone(candidate)
+        if region:
+            return region
+    return None
+
+
+def _care_text_is_high_risk(text: str | None) -> bool:
+    lowered = _normalize_ai_text(text or '')
+    if not lowered:
+        return False
+    return any(token in lowered for token in HIGH_RISK_SUPPORT_HINTS)
+
+
+def _care_crisis_support_payload(payload: dict | None = None, user_text: str | None = None, mood_label: str | None = None) -> dict | None:
+    normalized_mood = _normalize_mood_choice(mood_label, '')[0] if mood_label else ''
+    negative = normalized_mood in NEGATIVE_CARE_MOOD_LABELS or _care_text_is_high_risk(user_text)
+    if not negative:
+        return None
+
+    region = _resolve_support_region(payload) or 'US'
+    support = dict(CRISIS_SUPPORT_BY_REGION.get(region) or CRISIS_SUPPORT_BY_REGION['US'])
+    support['region'] = region
+    support['show_now'] = True
+    return support
+
+
+def _consume_ai_suggestion_followup() -> dict | None:
+    if not has_request_context():
+        return None
+    return session.pop('pending_ai_suggestion_followup', None)
+
+
+
+def _queue_ai_suggestion_followup(task: Task, follow_up_question: str | None = None) -> None:
+    if not has_request_context() or not task:
+        return
+    session['pending_ai_suggestion_followup'] = {
+        'task_id': int(task.id),
+        'task_title': task.title,
+        'question': (follow_up_question or task.ai_followup_question or '').strip() or 'After doing this AI suggestion, how much better do you feel out of 10 regarding the negativity detected earlier?',
+    }
+
+
+
+def _consume_ai_suggestion_added() -> dict | None:
+    if not has_request_context():
+        return None
+    return session.pop('pending_ai_suggestion_added', None)
+
+
+
+def _queue_ai_suggestion_added(task: Task, source_label: str | None = None) -> None:
+    if not has_request_context() or not task:
+        return
+    clean_source = str(source_label or task.ai_generated_source or 'ai').replace('_', ' ').strip() or 'ai'
+    session['pending_ai_suggestion_added'] = {
+        'task_id': int(task.id),
+        'task_title': task.title,
+        'source_label': clean_source,
+        'message': f"AI suggestion added: {task.title}",
+        'detail': f"Added to today's todo list · source: {clean_source}",
+    }
+
+
+
+def _decorate_feedback_with_ai_task(feedback: dict | None, task: Task | None, status: str = 'added') -> dict | None:
+    if not feedback or not task:
+        return feedback
+    enhanced = dict(feedback)
+    enhanced['ai_suggestion_task_title'] = task.title
+    enhanced['ai_suggestion_status'] = status
+    current_message = str(enhanced.get('message') or '').strip()
+    if status == 'added':
+        addition = f"I added a personalized todo for you: {task.title}."
+    else:
+        addition = f"You already have an unfinished AI suggestion: {task.title}. I did not add another one."
+    enhanced['message'] = f"{current_message} {addition}".strip() if current_message else addition
+    return enhanced
+
+
+
+def _create_ai_suggestion_task(user_id: int, task_date: date, suggestion: dict[str, str], source_label: str) -> Task:
+    title = _clean_text(suggestion.get('title'), 200) or 'Take a short reset'
+    description = _clean_text(suggestion.get('description'), 1000)
+    follow_up_question = _clean_text(suggestion.get('follow_up_question'), 240)
+    suggestion_key = _clean_text(suggestion.get('suggestion_key'), 40) or _infer_ai_suggestion_key_from_text(title, description)
+    source_value = (source_label or 'ai')[:30]
+    task = Task(
+        user_id=user_id,
+        title=title,
+        description=description or None,
+        task_type='ai_suggestion',
+        task_date=task_date,
+        completed=False,
+        sort_order=_get_next_sort_order(user_id, task_date),
+        ai_generated_source=source_value,
+        ai_suggestion_key=suggestion_key or None,
+        ai_followup_question=follow_up_question or None,
+    )
+    db.session.add(task)
+    db.session.flush()
+    return task
+
+
+
+def _maybe_create_ai_suggestion_task(
+    user: User,
+    source_text: str,
+    detected_mood: str | None = None,
+    target_date: date | None = None,
+    source_label: str = 'ai',
+) -> dict:
+    combined_text = _clean_text(source_text, 3000)
+    mood_hint = detected_mood
+    if not combined_text and not mood_hint:
+        return {'task': None, 'suggestion': None, 'status': None, 'intervention_context': None}
+
+    negative = _mood_is_negative(mood_hint) if mood_hint else False
+    if not negative:
+        analysis = analyze_text_mood(combined_text, preferred=mood_hint or '')
+        mood_hint = _normalize_mood_choice(analysis.get('mood_label'), '')[0]
+        negative = mood_hint in NEGATIVE_MOOD_LABELS
+
+    if not negative:
+        return {'task': None, 'suggestion': None, 'status': None, 'intervention_context': None}
+
+    chosen_date = target_date or local_today()
+    intervention_context = _rank_personalized_interventions(user, combined_text or mood_hint or 'negative mood detected', detected_mood=mood_hint, target_date=chosen_date)
+    preferred = intervention_context.get('preferred_candidate') or {}
+    preferred_key = str(preferred.get('key') or '').strip() or None
+
+    if preferred_key:
+        same_key_open = next(
+            (
+                task for task in Task.query.filter_by(user_id=user.id, task_type='ai_suggestion', completed=False).order_by(Task.created_at.desc()).all()
+                if _task_ai_suggestion_key(task) == preferred_key
+            ),
+            None,
+        )
+        if same_key_open:
+            return {
+                'task': same_key_open,
+                'suggestion': _serialize_ai_suggestion_from_task(same_key_open),
+                'status': 'existing_same_key',
+                'intervention_context': intervention_context,
+            }
+
+    active_same_day = intervention_context.get('active_same_day_task')
+    if active_same_day:
+        return {
+            'task': active_same_day,
+            'suggestion': _serialize_ai_suggestion_from_task(active_same_day),
+            'status': 'existing_same_day',
+            'intervention_context': intervention_context,
+        }
+
+    suggestion = recommend_micro_intervention(
+        combined_text,
+        detected_mood=mood_hint,
+        wellness_scores=_score_snapshot(user),
+        intervention_context=intervention_context,
+    )
+    task = _create_ai_suggestion_task(user.id, chosen_date, suggestion, source_label)
+    _queue_ai_suggestion_added(task, source_label)
+    _log_activity_entry(
+        user.id,
+        'task',
+        'AI suggestion added',
+        f"{task.title} ({chosen_date.isoformat()}) · source: {source_label} · key: {_task_ai_suggestion_key(task) or 'custom'}",
+        impacts=[
+            {'key': 'overall', 'label': 'Overall Wellness', 'value': 0, 'signed': '+0'},
+        ],
+    )
+    return {
+        'task': task,
+        'suggestion': suggestion,
+        'status': 'added',
+        'intervention_context': intervention_context,
+    }
 
 
 def _build_mood_trend_payload(user_id: int, days: int = 14) -> dict:
@@ -339,6 +1064,97 @@ def _normalize_task_text(value: str | None) -> str:
 
 
 
+def _care_intent_match(text: str | None, patterns: list[str]) -> bool:
+    normalized = _normalize_task_text(text)
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized) for pattern in patterns)
+
+
+def _care_requested_quick_action(text: str | None) -> str | None:
+    if _care_intent_match(text, CARE_EYE_EXERCISE_INTENT_PATTERNS):
+        return 'eye_exercise'
+    if _care_intent_match(text, CARE_WATER_INTENT_PATTERNS):
+        return 'hydration'
+    return None
+
+
+def _ensure_care_eye_exercise_prompt(user_id: int) -> EyeExercisePrompt:
+    active_prompt = _get_active_eye_exercise_prompt(user_id)
+    if active_prompt:
+        return active_prompt
+
+    state = _get_or_create_eye_exercise_state(user_id)
+    existing = EyeExercisePrompt.query.filter(
+        EyeExercisePrompt.user_id == user_id,
+        EyeExercisePrompt.response_status.in_(['pending', 'watching', 'not_yet']),
+        db.func.date(EyeExercisePrompt.due_at) == local_today(),
+    ).order_by(EyeExercisePrompt.created_at.desc(), EyeExercisePrompt.id.desc()).first()
+    if existing:
+        state.active_prompt_id = existing.id
+        state.updated_at = local_now().replace(tzinfo=None)
+        return existing
+
+    now = local_now().replace(tzinfo=None)
+    prompt = EyeExercisePrompt(
+        user_id=user_id,
+        focus_minutes_trigger=0,
+        threshold_minutes=0,
+        video_url=EYE_EXERCISE_VIDEO_URL,
+        response_status='pending',
+        due_at=now,
+        created_at=now,
+    )
+    db.session.add(prompt)
+    db.session.flush()
+    state.active_prompt_id = prompt.id
+    state.updated_at = now
+    return prompt
+
+
+def _ensure_care_hydration_prompt(user: User) -> HydrationPrompt:
+    existing = HydrationPrompt.query.filter(
+        HydrationPrompt.user_id == user.id,
+        HydrationPrompt.prompt_type == 'care_water',
+        HydrationPrompt.response_status.in_(['pending', 'not_yet']),
+        db.func.date(HydrationPrompt.due_at) == local_today(),
+    ).order_by(HydrationPrompt.created_at.desc(), HydrationPrompt.id.desc()).first()
+    if existing:
+        return existing
+
+    now = local_now().replace(tzinfo=None)
+    prompt = HydrationPrompt(
+        user_id=user.id,
+        log_id=_get_or_create_log_for_today(user.id).id,
+        prompt_type='care_water',
+        message='You said you want to drink water now. Choose your drink and amount here.',
+        beverage='water',
+        response_status='pending',
+        due_at=now,
+        created_at=now,
+    )
+    db.session.add(prompt)
+    db.session.flush()
+    return prompt
+
+
+def _care_quick_action_payload(user: User, text: str | None) -> dict | None:
+    action = _care_requested_quick_action(text)
+    if action == 'eye_exercise':
+        prompt = _ensure_care_eye_exercise_prompt(user.id)
+        return {
+            'type': 'eye_exercise',
+            'prompt': _serialize_eye_exercise_prompt(prompt),
+        }
+    if action == 'hydration':
+        prompt = _ensure_care_hydration_prompt(user)
+        return {
+            'type': 'hydration',
+            'prompt': _serialize_prompt(prompt),
+        }
+    return None
+
+
 def _task_type(task: Task) -> str:
     stored = (getattr(task, 'task_type', None) or '').strip().lower()
     if stored:
@@ -368,8 +1184,13 @@ def _task_is_eye_exercise(task: Task) -> bool:
 
 
 
+def _task_is_ai_suggestion(task: Task) -> bool:
+    return _task_type(task) == 'ai_suggestion'
+
+
+
 def _task_is_focus_eligible(task: Task) -> bool:
-    return not _task_is_meal(task) and not _task_is_hydration(task) and not _task_is_eye_exercise(task)
+    return not _task_is_meal(task) and not _task_is_hydration(task) and not _task_is_eye_exercise(task) and not _task_is_ai_suggestion(task)
 
 
 
@@ -550,6 +1371,7 @@ def _selected_day_finished_items(events, tasks):
                 'id': task.id,
                 'title': task.title,
                 'description': (task.description or '').strip() or None,
+                'task_type': _task_type(task),
                 'time_label': None,
                 'completed': True,
                 'sort_key': (1, datetime.min.time(), task.sort_order, task.created_at or datetime.min),
@@ -707,6 +1529,188 @@ HYDRATION_SLOT_META = [
     ('scheduled_lunch', 'Lunch glass', 'hydration_lunch_time'),
     ('scheduled_dinner', 'Dinner glass', 'hydration_dinner_time'),
 ]
+HYDRATION_SLOT_LABELS = {slot_key: label for slot_key, label, _ in HYDRATION_SLOT_META}
+
+
+def _hydration_active_prompt_filter():
+    fixed_filters = [HydrationPrompt.prompt_type == slot_key for slot_key, _, _ in HYDRATION_SLOT_META]
+    return db.or_(*fixed_filters, HydrationPrompt.prompt_type.like('scheduled_extra_%'))
+
+
+def _hydration_prompt_label(prompt_type: str | None) -> str:
+    normalized = (prompt_type or '').strip().lower()
+    if normalized in HYDRATION_SLOT_LABELS:
+        return HYDRATION_SLOT_LABELS[normalized]
+    if normalized.startswith('scheduled_extra_'):
+        return 'Extra water'
+    if normalized == 'care_water':
+        return 'Drink water'
+    return 'Water reminder'
+
+
+def _round_time_to_five_minutes(value: datetime) -> datetime:
+    rounded = value.replace(second=0, microsecond=0)
+    remainder = rounded.minute % 5
+    if remainder:
+        rounded += timedelta(minutes=(5 - remainder))
+    return rounded
+
+
+def _shift_hydration_candidate(
+    candidate: datetime,
+    blocked_times: list[datetime],
+    window_start: datetime,
+    window_end: datetime,
+    min_gap_minutes: int,
+) -> datetime:
+    if window_end <= window_start:
+        return window_start
+
+    min_gap_seconds = max(int(min_gap_minutes), 1) * 60
+    clamped = max(min(candidate, window_end), window_start)
+    if not blocked_times:
+        return clamped
+
+    def clear(dt: datetime) -> bool:
+        return all(abs((dt - blocked).total_seconds()) >= min_gap_seconds for blocked in blocked_times)
+
+    rounded = _round_time_to_five_minutes(clamped)
+    if clear(rounded):
+        return rounded
+
+    for step in range(1, 25):
+        for direction in (1, -1):
+            shifted = _round_time_to_five_minutes(rounded + timedelta(minutes=step * 10 * direction))
+            if shifted < window_start or shifted > window_end:
+                continue
+            if clear(shifted):
+                return shifted
+
+    return rounded
+
+
+def _build_extra_hydration_rows(
+    start_dt: datetime,
+    end_dt: datetime,
+    blocked_times: list[datetime],
+    extra_count: int,
+) -> list[dict[str, str]]:
+    if extra_count <= 0 or end_dt <= start_dt:
+        return []
+
+    window_start = _round_time_to_five_minutes(start_dt)
+    window_end = _round_time_to_five_minutes(end_dt)
+    if window_end <= window_start:
+        return []
+
+    duration_seconds = max((window_end - window_start).total_seconds(), 1)
+    placed: list[datetime] = []
+    rows: list[dict[str, str]] = []
+
+    for index in range(1, extra_count + 1):
+        fraction = index / (extra_count + 1)
+        candidate = window_start + timedelta(seconds=duration_seconds * fraction)
+        adjusted = _shift_hydration_candidate(
+            candidate,
+            blocked_times + placed,
+            window_start,
+            window_end,
+            HYDRATION_EXTRA_MIN_GAP_MINUTES,
+        )
+        placed.append(adjusted)
+        time_text = adjusted.strftime('%H:%M')
+        rows.append({
+            'slot_key': f"scheduled_extra_{time_text.replace(':', '')}",
+            'label': 'Extra water',
+            'time_text': time_text,
+            'display_time': adjusted.strftime('%I:%M %p').lstrip('0'),
+            'due_at': adjusted,
+        })
+
+    rows.sort(key=lambda item: item['due_at'])
+    return rows
+
+
+def _water_logged_for_date(user_id: int, target_date: date) -> int:
+    log = DailyLog.query.filter_by(user_id=user_id, log_date=target_date).order_by(DailyLog.id.desc()).first()
+    return max(int(log.water_ml or 0), 0) if log else 0
+
+
+def _hydration_goal_plan(user: User, target_date: date | None = None) -> dict:
+    chosen_date = target_date or local_today()
+    _ensure_hydration_schedule_defaults(user)
+    fixed_rows = _hydration_schedule_rows(user)
+    wake_dt, bedtime_dt = _sleep_schedule_for_date(user, chosen_date)
+    now = local_now().replace(tzinfo=None) if chosen_date == local_today() else wake_dt
+    day_end = bedtime_dt - timedelta(minutes=15)
+    grace_dt = now - timedelta(minutes=HYDRATION_DUE_GRACE_MINUTES)
+
+    existing_fixed_prompts = HydrationPrompt.query.filter(
+        HydrationPrompt.user_id == user.id,
+        HydrationPrompt.prompt_type.in_([slot_key for slot_key, _, _ in HYDRATION_SLOT_META]),
+        db.func.date(HydrationPrompt.due_at) == chosen_date,
+    ).all()
+    existing_fixed_by_type = {row.prompt_type: row for row in existing_fixed_prompts}
+
+    fixed_slots = []
+    for row in fixed_rows:
+        due_at = datetime.combine(chosen_date, _parse_clock_text(row['time_text'], row['time_text']))
+        existing_prompt = existing_fixed_by_type.get(row['slot_key'])
+        prompt_status = (existing_prompt.response_status or '').strip().lower() if existing_prompt else 'pending'
+        if prompt_status in {'finished', 'dismissed'}:
+            continue
+        fixed_slots.append({**row, 'due_at': due_at})
+    fixed_slots.sort(key=lambda item: item['due_at'])
+
+    active_fixed_rows = [
+        row for row in fixed_slots
+        if row['due_at'] >= grace_dt and row['due_at'] <= day_end
+    ]
+
+    current_water_ml = _water_logged_for_date(user.id, chosen_date)
+    goal_ml = max(int(user.daily_water_goal_ml or 0), GLASS_VOLUME_ML)
+    fixed_remaining_ml = len(active_fixed_rows) * GLASS_VOLUME_ML
+    remaining_after_fixed_ml = max(goal_ml - current_water_ml - fixed_remaining_ml, 0)
+    extra_count = min(max(math.ceil(remaining_after_fixed_ml / GLASS_VOLUME_ML), 0), 12)
+    extra_rows = _build_extra_hydration_rows(
+        max(now + timedelta(minutes=10), wake_dt),
+        day_end,
+        [row['due_at'] for row in active_fixed_rows if row['due_at'] >= now],
+        extra_count,
+    )
+
+    planned_remaining_ml = fixed_remaining_ml + (len(extra_rows) * GLASS_VOLUME_ML)
+    remaining_after_plan_ml = max(goal_ml - current_water_ml - planned_remaining_ml, 0)
+
+    if extra_rows:
+        preview_text = (
+            f"Today you have {current_water_ml} / {goal_ml} ml logged. "
+            f"Beyond the four anchor reminders, WellHabit spaces {len(extra_rows)} extra water reminder"
+            f"{'s' if len(extra_rows) != 1 else ''} so the rest of your goal fits into the day."
+        )
+    elif remaining_after_plan_ml > 0:
+        preview_text = (
+            f"Today you have {current_water_ml} / {goal_ml} ml logged. "
+            f"There is still about {remaining_after_plan_ml} ml left today, but there is not enough time left to space more automatic reminders well."
+        )
+    else:
+        preview_text = (
+            f"Today you have {current_water_ml} / {goal_ml} ml logged. "
+            "Your remaining goal is already covered by the anchor reminders still left today."
+        )
+
+    return {
+        'goal_ml': goal_ml,
+        'current_water_ml': current_water_ml,
+        'current_glasses_text': _format_glasses(current_water_ml),
+        'remaining_ml': max(goal_ml - current_water_ml, 0),
+        'remaining_glasses_text': _format_glasses(max(goal_ml - current_water_ml, 0)),
+        'active_fixed_rows': active_fixed_rows,
+        'extra_rows': extra_rows,
+        'preview_text': preview_text,
+        'planned_remaining_ml': planned_remaining_ml,
+        'remaining_after_plan_ml': remaining_after_plan_ml,
+    }
 
 
 def _default_hydration_schedule_map(user: User) -> dict[str, str]:
@@ -766,8 +1770,16 @@ def _retire_legacy_hydration_prompts(user_id: int, target_date: date) -> None:
 
 
 
-def _hydrate_prompt_message_from_slot(label: str, due_at: datetime) -> str:
+def _hydrate_prompt_message_from_slot(label: str, due_at: datetime, user: User | None = None, extra_context: dict | None = None) -> str:
     time_label = due_at.strftime('%I:%M %p').lstrip('0')
+    if (label or '').lower() == 'extra water' and user is not None:
+        goal_ml = max(int(user.daily_water_goal_ml or 0), GLASS_VOLUME_ML)
+        current_ml = int((extra_context or {}).get('current_water_ml') or 0)
+        remaining_ml = max(goal_ml - current_ml, 0)
+        return (
+            f"Extra water reminder: have about one glass around {time_label}. "
+            f"You still need roughly {remaining_ml} ml today to reach your {goal_ml} ml goal."
+        )
     return f"{label} reminder: have one glass of water around {time_label}."
 
 
@@ -779,24 +1791,30 @@ def _sync_goal_based_hydration_prompts(user: User, target_date: date | None = No
 
     _ensure_hydration_schedule_defaults(user)
     _retire_legacy_hydration_prompts(user.id, chosen_date)
-    schedule_rows = _hydration_schedule_rows(user)
     now = local_now().replace(tzinfo=None)
+    grace_cutoff = now - timedelta(minutes=HYDRATION_DUE_GRACE_MINUTES)
+    plan = _hydration_goal_plan(user, chosen_date)
 
+    desired_rows = list(plan['active_fixed_rows']) + list(plan['extra_rows'])
     desired_by_type = {}
-    for row in schedule_rows:
-        due_at = datetime.combine(chosen_date, _parse_clock_text(row['time_text'], row['time_text']))
+    for row in desired_rows:
         desired_by_type[row['slot_key']] = {
             'label': row['label'],
-            'due_at': due_at,
-            'message': _hydrate_prompt_message_from_slot(row['label'], due_at),
+            'due_at': row['due_at'],
+            'message': _hydrate_prompt_message_from_slot(row['label'], row['due_at'], user=user, extra_context=plan),
         }
 
     existing_rows = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user.id,
-        HydrationPrompt.prompt_type.in_(list(desired_by_type.keys())),
+        _hydration_active_prompt_filter(),
         db.func.date(HydrationPrompt.due_at) == chosen_date,
     ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).all()
     existing_by_type = {row.prompt_type: row for row in existing_rows}
+
+    for prompt in existing_rows:
+        if prompt.prompt_type not in desired_by_type and prompt.response_status in {'pending', 'not_yet'}:
+            prompt.response_status = 'dismissed'
+            prompt.responded_at = now
 
     for prompt_type, payload in desired_by_type.items():
         prompt = existing_by_type.get(prompt_type)
@@ -820,9 +1838,20 @@ def _sync_goal_based_hydration_prompts(user: User, target_date: date | None = No
         if prompt.response_status == 'not_yet' and prompt.due_at and prompt.due_at > now:
             chosen_due_at = prompt.due_at
         prompt.due_at = chosen_due_at
-        prompt.message = _hydrate_prompt_message_from_slot(payload['label'], chosen_due_at)
+        prompt.message = _hydrate_prompt_message_from_slot(payload['label'], chosen_due_at, user=user, extra_context=plan)
         if prompt.response_status not in {'pending', 'not_yet'}:
             prompt.response_status = 'pending'
+
+    stale_prompts = HydrationPrompt.query.filter(
+        HydrationPrompt.user_id == user.id,
+        _hydration_active_prompt_filter(),
+        HydrationPrompt.response_status.in_(['pending', 'not_yet']),
+        db.func.date(HydrationPrompt.due_at) == chosen_date,
+        HydrationPrompt.due_at < grace_cutoff,
+    ).all()
+    for prompt in stale_prompts:
+        prompt.response_status = 'dismissed'
+        prompt.responded_at = now
 
 
 
@@ -832,18 +1861,19 @@ def _get_due_and_upcoming_prompt(user_id: int):
         return None, None
     _sync_goal_based_hydration_prompts(user, local_today())
     now = local_now().replace(tzinfo=None)
-    active_types = [slot_key for slot_key, _, _ in HYDRATION_SLOT_META]
+    grace_cutoff = now - timedelta(minutes=HYDRATION_DUE_GRACE_MINUTES)
     due_prompt = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type.in_(active_types),
+        _hydration_active_prompt_filter(),
         HydrationPrompt.response_status.in_(['pending', 'not_yet']),
         db.func.date(HydrationPrompt.due_at) == local_today(),
         HydrationPrompt.due_at <= now,
+        HydrationPrompt.due_at >= grace_cutoff,
     ).order_by(HydrationPrompt.due_at.asc(), HydrationPrompt.id.asc()).first()
 
     upcoming_prompt = HydrationPrompt.query.filter(
         HydrationPrompt.user_id == user_id,
-        HydrationPrompt.prompt_type.in_(active_types),
+        _hydration_active_prompt_filter(),
         HydrationPrompt.response_status.in_(['pending', 'not_yet']),
         db.func.date(HydrationPrompt.due_at) == local_today(),
         HydrationPrompt.due_at > now,
@@ -856,7 +1886,7 @@ def _get_due_and_upcoming_prompt(user_id: int):
 def _serialize_prompt(prompt: HydrationPrompt | None):
     if not prompt:
         return None
-    slot_label = next((label for slot_key, label, _ in HYDRATION_SLOT_META if slot_key == prompt.prompt_type), 'Water reminder')
+    slot_label = _hydration_prompt_label(prompt.prompt_type)
     return {
         'id': prompt.id,
         'prompt_type': prompt.prompt_type,
@@ -904,10 +1934,15 @@ def _get_active_eye_exercise_prompt(user_id: int) -> EyeExercisePrompt | None:
 def _serialize_eye_exercise_prompt(prompt: EyeExercisePrompt | None):
     if not prompt:
         return None
+    focus_trigger = int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES)
+    if int(prompt.focus_minutes_trigger or 0) <= 0:
+        message = 'You asked to do an eye exercise now. Do you want to start it?'
+    else:
+        message = f"You've focused for {focus_trigger} minutes. Do you want to do an eye exercise now?"
     return {
         'id': prompt.id,
-        'message': f"You've focused for {int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES)} minutes. Do you want to do an eye exercise now?",
-        'focus_minutes_trigger': int(prompt.focus_minutes_trigger or EYE_EXERCISE_THRESHOLD_MINUTES),
+        'message': message,
+        'focus_minutes_trigger': focus_trigger,
         'threshold_minutes': int(prompt.threshold_minutes or EYE_EXERCISE_THRESHOLD_MINUTES),
         'response_status': prompt.response_status,
         'video_url': prompt.video_url or EYE_EXERCISE_VIDEO_URL,
@@ -1237,7 +2272,7 @@ def _history_entry_impacts(entry: ActivityEntry):
         'mood': 0,
     }
 
-    if title_text in {'task added', 'task edited', 'task deleted'}:
+    if title_text in {'task added', 'task edited', 'task deleted', 'ai suggestion added'}:
         impacts['overall'] = 0
     else:
         is_meal = any(word in text for word in ['breakfast', 'lunch', 'dinner', 'meal'])
@@ -1631,6 +2666,8 @@ def register_routes(app):
             'nav_local_date': local_now().strftime('%A, %B %d, %Y'),
             'nav_local_time': local_now().strftime('%I:%M %p'),
             'pending_wellness_feedback': _consume_wellness_feedback(),
+            'pending_ai_suggestion_followup': _consume_ai_suggestion_followup(),
+            'pending_ai_suggestion_added': _consume_ai_suggestion_added(),
             'current_avatar_emoji': (current_user.avatar_emoji if current_user.is_authenticated else '🙂'),
         }
 
@@ -1833,6 +2870,7 @@ def register_routes(app):
             mood_trend=_build_mood_trend_payload(current_user.id, 14),
             goal_intensity_choices=GOAL_INTENSITY_CHOICES,
             hydration_schedule_rows=_hydration_schedule_rows(current_user) if locked else [],
+            hydration_goal_plan=_hydration_goal_plan(current_user) if locked else None,
         )
 
     @app.route('/history')
@@ -2027,6 +3065,17 @@ def register_routes(app):
             meal_detected = _update_log_meal_insight(current_user.id, log, candidate_text)
             latest_event = 'Daily log updated: ' + ', '.join(changes)
             payload = _apply_wellness_update(current_user, selected_date, latest_event)
+            ai_result = _maybe_create_ai_suggestion_task(
+                current_user,
+                candidate_text or latest_event,
+                detected_mood=log.mood_label,
+                target_date=local_today(),
+                source_label='journal',
+            )
+            ai_task = ai_result.get('task')
+            if ai_task:
+                payload['feedback'] = _decorate_feedback_with_ai_task(payload.get('feedback'), ai_task, status=ai_result.get('status') or 'added')
+                _store_wellness_feedback(payload.get('feedback'))
             _log_activity_entry(current_user.id, 'daily_log', 'Daily log updated', latest_event, impacts=payload.get('feedback', {}).get('metrics'))
             db.session.commit()
 
@@ -2159,7 +3208,38 @@ def register_routes(app):
         event_label = f'Completed todo: {task.title}' if task.completed else f'Reopened todo: {task.title}'
         payload = None
 
-        if _task_is_hydration(task):
+        if _task_is_ai_suggestion(task):
+            if not task.ai_suggestion_key:
+                task.ai_suggestion_key = _task_ai_suggestion_key(task)
+            log = _get_or_create_log_for_date(current_user.id, task.task_date)
+            if task.completed:
+                task.ai_followup_rating = None
+                task.ai_followup_completed_at = None
+                if task.task_date == local_today() and _task_is_hydration(task):
+                    amount_ml = int(convert_drink_amount_to_ml(_infer_beverage_from_text(task.title), task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
+                    if not int(task.auto_tracked_water_ml or 0):
+                        log.water_ml = int(log.water_ml or 0) + amount_ml
+                        task.auto_tracked_water_ml = amount_ml
+                    else:
+                        amount_ml = int(task.auto_tracked_water_ml or amount_ml)
+                    event_label = f'Completed AI suggestion: {task.title} · counted {amount_ml} ml'
+                    payload = _apply_wellness_update(current_user, task.task_date, f'Completed AI suggestion todo: {task.title} and drank {amount_ml} ml')
+                elif task.task_date == local_today():
+                    event_label = f'Completed AI suggestion: {task.title}'
+                    payload = _apply_wellness_update(current_user, task.task_date, f'Completed AI suggestion todo: {task.title}')
+                _queue_ai_suggestion_followup(task)
+            else:
+                task.ai_followup_rating = None
+                task.ai_followup_completed_at = None
+                if was_completed and int(task.auto_tracked_water_ml or 0):
+                    removed_ml = int(task.auto_tracked_water_ml or 0)
+                    log.water_ml = max(0, int(log.water_ml or 0) - removed_ml)
+                    task.auto_tracked_water_ml = 0
+                    event_label = f'Reopened AI suggestion: {task.title} · removed {removed_ml} ml'
+                    payload = _apply_wellness_update(current_user, task.task_date, f'Reopened AI suggestion todo: {task.title} and removed {removed_ml} ml')
+                else:
+                    event_label = f'Reopened AI suggestion: {task.title}'
+        elif _task_is_hydration(task):
             log = _get_or_create_log_for_date(current_user.id, task.task_date)
             if task.completed and task.task_date == local_today():
                 amount_ml = int(convert_drink_amount_to_ml(_infer_beverage_from_text(task.title), task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
@@ -2213,6 +3293,38 @@ def register_routes(app):
         _log_activity_entry(current_user.id, 'task', 'Task edited', task.title)
         db.session.commit()
         return jsonify({'message': 'Task updated.', 'title': task.title, 'wellness_feedback': None})
+
+    @app.route('/tasks/<int:task_id>/ai-followup', methods=['POST'])
+    @login_required
+    def save_ai_suggestion_followup(task_id):
+        task = Task.query.filter_by(id=task_id, user_id=current_user.id).first_or_404()
+        if not _task_is_ai_suggestion(task):
+            return jsonify({'message': 'This is not an AI suggestion task.'}), 400
+
+        data = request.get_json(silent=True) or request.form
+        rating = _parse_int(data.get('rating'), default=0)
+        if rating < 1 or rating > 10:
+            return jsonify({'message': 'Choose a number from 1 to 10.'}), 400
+
+        if not task.ai_suggestion_key:
+            task.ai_suggestion_key = _task_ai_suggestion_key(task)
+        task.ai_followup_rating = rating
+        task.ai_followup_completed_at = local_now().replace(tzinfo=None)
+        latest_event = f'AI suggestion follow-up after negativity detected: felt better {rating}/10 after {task.title}'
+        payload = _apply_wellness_update(current_user, local_today(), latest_event)
+        _log_activity_entry(
+            current_user.id,
+            'care',
+            'AI suggestion follow-up saved',
+            f'{task.title} · feel better {rating}/10 after negativity detected',
+            impacts=payload.get('feedback', {}).get('metrics') if payload else None,
+        )
+        db.session.commit()
+        return jsonify({
+            'message': 'Follow-up saved.',
+            'rating': rating,
+            'wellness_feedback': payload.get('feedback') if payload else None,
+        })
 
     @app.route('/tasks/<int:task_id>/delete', methods=['POST'])
     @login_required
@@ -2419,8 +3531,9 @@ def register_routes(app):
             wellness_metrics=_serialize_wellness(current_user),
             care_session_id=care_session_id,
             care_intro_message=(
-                "I’m here with you. Tell me how you feel, and I’ll respond with your current hydration, energy, fitness, focus, mood, and overall wellness in mind."
+                "I’m here with you. This is habit support, not medical advice or therapy. Your scores are behavioral estimates, not clinical metrics. Tell me how you feel, and I’ll respond with your current hydration, energy, fitness, focus, mood, and overall wellness in mind."
             ),
+            care_boundary_lines=CARE_BOUNDARY_LINES,
         )
 
     @app.route('/care/message', methods=['POST'])
@@ -2435,11 +3548,23 @@ def register_routes(app):
         if not messages or messages[-1]['role'] != 'user':
             return jsonify({'message': 'Please send a user message first.'}), 400
 
-        reply_payload = care_chat_reply(messages, _score_snapshot(current_user))
+        latest_user_text = messages[-1].get('content') or ''
+        care_context_text = ' '.join(item.get('content') or '' for item in messages if item.get('role') == 'user').strip()
+        intervention_context = _rank_personalized_interventions(
+            current_user,
+            care_context_text or latest_user_text,
+            detected_mood=None,
+            target_date=local_today(),
+        )
+        reply_payload = care_chat_reply(messages, _score_snapshot(current_user), intervention_context=intervention_context)
+        quick_action = _care_quick_action_payload(current_user, latest_user_text)
+        if quick_action:
+            db.session.commit()
         return jsonify(
             {
                 'assistant_message': reply_payload.get('reply') or 'I’m here with you.',
                 'risk_level': reply_payload.get('risk_level') or 'low',
+                'quick_action': quick_action,
             }
         )
 
@@ -2474,11 +3599,27 @@ def register_routes(app):
             detected_by='ai',
         )
         payload = _apply_wellness_update(current_user, local_today(), summary_payload.get('latest_event') or 'Care chat ended')
+        care_user_text = ' '.join(item.get('content') or '' for item in messages if item.get('role') == 'user').strip()
+        ai_result = _maybe_create_ai_suggestion_task(
+            current_user,
+            care_user_text or summary_payload.get('summary') or summary_payload.get('latest_event') or 'Care chat ended',
+            detected_mood=detected_mood[0],
+            target_date=local_today(),
+            source_label='care_chat',
+        )
+        ai_task = ai_result.get('task')
         feedback = dict(payload.get('feedback') or {})
         feedback['care_summary'] = summary_payload.get('summary') or 'A caring AI chat was completed.'
         feedback['detected_mood'] = mood_badge['display']
         feedback['detected_mood_label'] = mood_badge['label']
         feedback['title'] = 'Care chat ended'
+        feedback['boundary_lines'] = CARE_BOUNDARY_LINES
+        crisis_support = _care_crisis_support_payload(data, care_user_text, detected_mood[0])
+        if crisis_support:
+            feedback['crisis_support'] = crisis_support
+            feedback['message'] = f"{str(feedback.get('message') or '').strip()} Real-person support is available too.".strip()
+        if ai_task:
+            feedback = _decorate_feedback_with_ai_task(feedback, ai_task, status=ai_result.get('status') or 'added') or feedback
         _store_wellness_feedback(feedback)
         _log_activity_entry(
             current_user.id,
@@ -2685,7 +3826,7 @@ def register_routes(app):
         elif action == 'not_yet':
             prompt.response_status = 'dismissed'
             task_date = local_today()
-            reminder_text = next((label for slot_key, label, _ in HYDRATION_SLOT_META if slot_key == prompt.prompt_type), 'Drink water')
+            reminder_text = _hydration_prompt_label(prompt.prompt_type)
             existing_task = Task.query.filter_by(user_id=current_user.id, task_date=task_date, title=reminder_text, completed=False).first()
             if not existing_task:
                 db.session.add(Task(

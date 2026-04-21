@@ -5,6 +5,12 @@
     <div>
         <h1>Care AI Chat</h1>
         <p class="muted">A gentle space to talk through exhaustion, anxiety, happiness, or stress. The AI replies with your current wellness scores in mind and updates them only when the chat ends.</p>
+        <div class="care-boundary-callout">
+            <p class="eyebrow">Important limits</p>
+            <ul class="care-boundary-list">
+                {% for line in care_boundary_lines %}<li>{{ line }}</li>{% endfor %}
+            </ul>
+        </div>
     </div>
     <div class="pill-group">
         <span class="pill">Ends automatically when you leave this page</span>
@@ -37,7 +43,7 @@
                     <div>
                         <p class="eyebrow">Conversation</p>
                         <h2>Talk it out here</h2>
-                        <p class="muted small">This chat is not saved forever. When it ends, WellHabit stores only a short summary in History and refreshes your scores.</p>
+                        <p class="muted small">This chat is not saved forever. When it ends, WellHabit stores only a short summary in History and refreshes your scores. Those scores are behavioral estimates, not clinical metrics.</p>
                     </div>
                 </div>
                 <button class="btn secondary" type="button" id="care-end-btn">End chat</button>

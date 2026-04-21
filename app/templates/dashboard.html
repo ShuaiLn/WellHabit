@@ -66,6 +66,7 @@
                                 <input type="checkbox" {% if task.completed %}checked{% endif %} {% if (task.task_type or 'regular') == 'meal' %}data-meal-toggle="1"{% else %}onchange="this.form.submit()"{% endif %}>
                                 <span>
                                     <strong>{{ task.title }}</strong>
+                                    {% if (task.task_type or 'regular') == 'ai_suggestion' %}<small class="task-type-badge ai-suggestion-badge">AI suggestion</small>{% endif %}
                                     {% if task.description and 'auto-added from what just did' not in task.description|lower %}<small class="task-description">{{ task.description }}</small>{% endif %}
                                 </span>
                             </label>

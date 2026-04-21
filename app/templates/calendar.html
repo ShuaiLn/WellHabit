@@ -38,7 +38,7 @@
                                 <div class="mini-task mini-event">{{ preview }}</div>
                             {% endfor %}
                             {% for task in day.tasks[:2] %}
-                                <div class="mini-task {% if task.completed %}done{% endif %}">{% if task.completed %}✓ {% endif %}{{ task.title }}</div>
+                                <div class="mini-task {% if task.completed %}done{% endif %}">{% if task.completed %}✓ {% endif %}{{ task.title }}{% if (task.task_type or 'regular') == 'ai_suggestion' %} · AI{% endif %}</div>
                             {% endfor %}
                             {% set hidden_count = (day.events|length + day.tasks|length) - (day.events[:2]|length + day.tasks[:2]|length) %}
                             {% if hidden_count > 0 %}
@@ -89,6 +89,7 @@
                         <div class="todo-item {% if item.completed %}done{% endif %} {% if item.kind == 'event' %}event-item{% endif %}">
                             <div>
                                 <strong>{% if item.completed %}✓ {% endif %}{% if item.time_label %}{{ item.time_label }} · {% endif %}{{ item.title }}</strong>
+                                {% if item.kind == 'task' and (item.task_type or 'regular') == 'ai_suggestion' %}<p class="muted small">AI suggestion</p>{% endif %}
                                 {% if item.description %}<p>{{ item.description }}</p>{% endif %}
                             </div>
                             <div class="todo-actions">
