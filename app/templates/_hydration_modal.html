@@ -1,9 +1,8 @@
 <div class="habit-modal-overlay" id="habit-modal-overlay" hidden>
-    <div class="habit-modal-card">
-        <p class="eyebrow" id="habit-modal-eyebrow">Goal-Based Hydration Reminder</p>
+    <div class="modal">
+        <p class="eyebrow" id="habit-modal-eyebrow">Hydration reminder</p>
         <h2 id="habit-modal-title">Scheduled water reminder</h2>
-        <p class="muted" id="habit-modal-message">Choose what you want to drink, type an amount, then tell WellHabit whether you finished it.</p>
-
+        <p class="muted" id="habit-modal-message">Choose a drink, add an amount, then tell WellHabit what happened.</p>
         <div class="hydration-choice-grid">
             <label>Beverage
                 <select id="hydration-beverage">
@@ -20,11 +19,10 @@
                 <input type="text" id="hydration-custom" placeholder="Write your drink name">
             </label>
         </div>
-
-        <div class="modal-actions big-modal-actions">
-            <button class="btn primary" type="button" id="hydration-finished-btn">Finished</button>
-            <button class="btn secondary" type="button" id="hydration-not-yet-btn">Not Yet</button>
-            <button class="btn danger" type="button" id="hydration-skip-btn">No Thanks</button>
+        <div class="modal-actions">
+            <button class="btn btn-primary" type="button" id="hydration-finished-btn">Done</button>
+            <button class="btn btn-secondary" type="button" id="hydration-not-yet-btn">Not Yet</button>
+            <button class="btn btn-danger" type="button" id="hydration-skip-btn">Skip</button>
         </div>
     </div>
 </div>

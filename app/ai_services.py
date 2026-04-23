@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import Any
+
+from .constants import AI_MAX_MESSAGE_CHARS, MAX_DAILY_WATER_ML, MINIMUM_AI_WATER_GOAL_ML, OPENAI_DEFAULT_MODEL, OPENAI_MODEL_FALLBACKS, WELLNESS_BLEND_FACTOR
+from .event_impact import ai_score_bumps_from_impacts, infer_event_impacts
+
+logger = logging.getLogger(__name__)
+_DISABLED_OPENAI_MODELS: set[str] = set()
 
 MEAL_KEYWORDS = {
     'eat', 'eating', 'ate', 'dinner', 'lunch', 'breakfast', 'brunch', 'snack', 'meal',
@@ -77,13 +84,6 @@ CARE_GROUNDING_WORDS = {
 }
 STRETCH_WORDS = {
     'stretch', 'stretching', 'yoga', 'mobility', '拉伸', '瑜伽'
-}
-
-QUALITY_SCORES = {
-    'poor': 35,
-    'average': 60,
-    'good': 80,
-    'excellent': 95,
 }
 
 MOOD_VALUE_MAP = {
@@ -203,10 +203,7 @@ def analyze_text_mood(text: str, preferred: str | None = None) -> dict[str, Any]
         return _fallback_detect_mood(cleaned, preferred=preferred)
 
     try:
-        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
-        response = client.responses.create(
-            model=model_name,
-            input=(
+        response, _ = _responses_create_with_fallback(client, (
                 'Classify the main mood in this short wellness text. '
                 'Return ONLY valid JSON with mood_label, mood_value, and display_label. '
                 'mood_label must be one of happy, normal, sad, anxious, exhausted, stressed, calm, overwhelmed, hopeful, mixed. '
@@ -230,6 +227,7 @@ def analyze_text_mood(text: str, preferred: str | None = None) -> dict[str, Any]
             'source': 'ai',
         }
     except Exception:
+        logger.warning('Mood analysis fell back to heuristic detection', exc_info=True)
         return _fallback_detect_mood(cleaned, preferred=preferred)
 
 def _format_clock(hours_float: float) -> str:
@@ -255,6 +253,52 @@ def _clamp_score(value: float) -> int:
 
 
 
+
+
+def _is_missing_model_error(exc: Exception) -> bool:
+    status_code = getattr(exc, 'status_code', None)
+    if status_code == 404:
+        return True
+
+    message = str(exc).lower()
+    return '404' in message and 'model' in message
+
+
+def _candidate_openai_models() -> list[str]:
+    preferred = (os.getenv('OPENAI_MODEL') or OPENAI_DEFAULT_MODEL).strip()
+    candidates: list[str] = []
+    for model_name in [preferred, *OPENAI_MODEL_FALLBACKS]:
+        cleaned = (model_name or '').strip()
+        if cleaned and cleaned not in _DISABLED_OPENAI_MODELS and cleaned not in candidates:
+            candidates.append(cleaned)
+
+    if candidates:
+        return candidates
+
+    default_model = (OPENAI_DEFAULT_MODEL or '').strip()
+    if default_model and default_model not in _DISABLED_OPENAI_MODELS:
+        return [default_model]
+    return []
+
+
+def _responses_create_with_fallback(client, prompt: str):
+    last_error: Exception | None = None
+    for model_name in _candidate_openai_models():
+        try:
+            response = client.responses.create(model=model_name, input=prompt)
+            return response, model_name
+        except Exception as exc:
+            last_error = exc
+            if _is_missing_model_error(exc):
+                _DISABLED_OPENAI_MODELS.add(model_name)
+                logger.warning('Disabling OpenAI model %s for the rest of this process after a 404 or missing-model error.', model_name)
+            else:
+                logger.warning('OpenAI request failed for model %s', model_name, exc_info=True)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError('No OpenAI model candidates configured')
+
+
 def _get_openai_client():
     api_key = os.getenv('OPENAI_API_KEY')
     if not api_key:
@@ -264,6 +308,7 @@ def _get_openai_client():
         from openai import OpenAI
         return OpenAI(api_key=api_key)
     except Exception:
+        logger.exception('Failed to initialize OpenAI client')
         return None
 
 
@@ -301,10 +346,7 @@ def analyze_meal_text(text: str) -> dict[str, Any]:
         return _keyword_detect(cleaned)
 
     try:
-        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
-        response = client.responses.create(
-            model=model_name,
-            input=(
+        response, _ = _responses_create_with_fallback(client, (
                 'You are classifying a short wellness journal entry. '
                 'Return ONLY valid JSON with keys ate_meal (boolean), confidence (string), and reason (string). '
                 'Set ate_meal to true only if the user likely ate a meal or snack. '
@@ -321,6 +363,7 @@ def analyze_meal_text(text: str) -> dict[str, Any]:
             'reason': str(payload.get('reason') or 'AI analysis completed.'),
         }
     except Exception:
+        logger.warning('Meal analysis fell back to keyword detection', exc_info=True)
         return _keyword_detect(cleaned)
 
 
@@ -329,10 +372,7 @@ def suggest_personal_goals(age: int | None, weight_kg: float | None, height_cm: 
     client = _get_openai_client()
     if client:
         try:
-            model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
-            response = client.responses.create(
-                model=model_name,
-                input=(
+            response, _ = _responses_create_with_fallback(client, (
                     'Suggest practical daily wellness targets for one person. '
                     'Return ONLY valid JSON with daily_water_goal_ml (int), daily_sleep_goal_hours (number), '
                     'daily_step_goal (int), optimal_bedtime (HH:MM 24-hour string), optimal_wake_time (HH:MM 24-hour string), and reason (string). '
@@ -347,7 +387,7 @@ def suggest_personal_goals(age: int | None, weight_kg: float | None, height_cm: 
             sleep_goal = max(6.0, min(10.0, float(payload.get('daily_sleep_goal_hours') or 8.0)))
             schedule = _recommended_sleep_schedule(age, sleep_goal)
             return {
-                'daily_water_goal_ml': max(1200, int(payload.get('daily_water_goal_ml') or 2000)),
+                'daily_water_goal_ml': max(MINIMUM_AI_WATER_GOAL_ML, int(payload.get('daily_water_goal_ml') or 2000)),
                 'daily_sleep_goal_hours': sleep_goal,
                 'daily_step_goal': max(4000, int(payload.get('daily_step_goal') or 8000)),
                 'optimal_bedtime': str(payload.get('optimal_bedtime') or schedule['optimal_bedtime'])[:5],
@@ -356,7 +396,7 @@ def suggest_personal_goals(age: int | None, weight_kg: float | None, height_cm: 
                 'source': 'ai',
             }
         except Exception:
-            pass
+            logger.warning('AI goal suggestion failed; using deterministic fallback', exc_info=True)
 
     weight = float(weight_kg or 60)
     age_value = int(age or 18)
@@ -407,7 +447,7 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
     direct_ml = re.search(r'(\d+(?:\.\d+)?)\s*ml\b', cleaned_amount)
     if direct_ml:
         return {
-            'amount_ml': max(0, int(float(direct_ml.group(1)))),
+            'amount_ml': _cap_amount_ml(float(direct_ml.group(1))),
             'source': 'direct_ml',
             'reason': 'Used the numeric ml value directly.',
         }
@@ -426,7 +466,7 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
             count = float(unit_match.group(1) or 1)
             unit = unit_match.group(2)
             return {
-                'amount_ml': max(0, int(count * BASE_UNIT_ML[unit])),
+                'amount_ml': _cap_amount_ml(count * BASE_UNIT_ML[unit]),
                 'source': source,
                 'reason': f'Converted {count:g} {unit} into ml.',
             }
@@ -434,7 +474,7 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
     plain_number = re.fullmatch(r'(\d+(?:\.\d+)?)', normalized)
     if plain_number:
         return {
-            'amount_ml': max(0, int(float(plain_number.group(1)))),
+            'amount_ml': _cap_amount_ml(float(plain_number.group(1))),
             'source': 'plain_number',
             'reason': 'Used the numeric value as ml.',
         }
@@ -442,10 +482,7 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
     client = _get_openai_client()
     if client:
         try:
-            model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
-            response = client.responses.create(
-                model=model_name,
-                input=(
+            response, _ = _responses_create_with_fallback(client, (
                     'Convert the following drink amount into milliliters. '
                     'Return ONLY valid JSON with keys amount_ml (integer) and reason (string). '
                     'Use practical everyday estimates. '
@@ -457,14 +494,14 @@ def convert_drink_amount_to_ml(beverage: str, amount_text: str) -> dict[str, Any
             raw_text = (response.output_text or '').strip()
             match = re.search(r'\{.*\}', raw_text, re.DOTALL)
             payload = json.loads(match.group(0) if match else raw_text)
-            amount_ml = max(0, int(float(payload.get('amount_ml') or 250)))
+            amount_ml = _cap_amount_ml(float(payload.get('amount_ml') or 250))
             return {
                 'amount_ml': amount_ml,
                 'source': 'ai',
                 'reason': str(payload.get('reason') or 'AI converted the amount to ml.'),
             }
         except Exception:
-            pass
+            logger.warning('Drink amount conversion via AI failed; using fallback conversion', exc_info=True)
 
     return {
         'amount_ml': 250,
@@ -563,10 +600,7 @@ def recommend_micro_intervention(
     client = _get_openai_client()
     if client and cleaned:
         try:
-            model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
-            response = client.responses.create(
-                model=model_name,
-                input=(
+            response, _ = _responses_create_with_fallback(client, (
                     'Create one very small wellness micro-intervention todo for a student after negativity was detected. '
                     'Return ONLY valid JSON with title, description, follow_up_question, reason, and suggestion_key. '
                     'Rules: the title must be imperative, under 60 characters, concrete, and suitable for a todo list. '
@@ -577,7 +611,7 @@ def recommend_micro_intervention(
                     f'Detected mood hint: {normalized_mood or "none"}. '
                     f'Wellness scores: {json.dumps(wellness_scores or {}, ensure_ascii=False)}. '
                     f'Intervention context: {json.dumps(intervention_context or {}, ensure_ascii=False)}. '
-                    f'Context: {cleaned[:1200]}'
+                    f'Context: {cleaned[:AI_MAX_MESSAGE_CHARS]}'
                 ),
             )
             raw_text = (response.output_text or '').strip()
@@ -598,7 +632,7 @@ def recommend_micro_intervention(
                     'suggestion_key': suggestion_key or None,
                 }
         except Exception:
-            pass
+            logger.warning('Micro intervention suggestion fell back to rule-based response', exc_info=True)
 
     flags = _care_text_flags(cleaned)
     scores = wellness_scores or {}
@@ -719,7 +753,7 @@ def care_chat_reply(
         content = (item.get('content') or '').strip()
         if role not in {'user', 'assistant'} or not content:
             continue
-        cleaned_messages.append({'role': role, 'content': content[:1200]})
+        cleaned_messages.append({'role': role, 'content': content[:AI_MAX_MESSAGE_CHARS]})
 
     if not cleaned_messages:
         return _fallback_care_chat_reply([], wellness_scores, intervention_context=intervention_context)
@@ -729,7 +763,6 @@ def care_chat_reply(
         return _fallback_care_chat_reply(cleaned_messages, wellness_scores, intervention_context=intervention_context)
 
     try:
-        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
         prompt = {
             'task': 'Respond as a caring wellness support chat inside a student habit app.',
             'rules': [
@@ -752,7 +785,7 @@ def care_chat_reply(
                 'risk_level': 'low | medium | high',
             },
         }
-        response = client.responses.create(model=model_name, input=json.dumps(prompt, ensure_ascii=False))
+        response, _ = _responses_create_with_fallback(client, json.dumps(prompt, ensure_ascii=False))
         raw_text = (response.output_text or '').strip()
         match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         payload = json.loads(match.group(0) if match else raw_text)
@@ -768,6 +801,7 @@ def care_chat_reply(
             'source': 'ai',
         }
     except Exception:
+        logger.warning('Care chat reply fell back to local response', exc_info=True)
         return _fallback_care_chat_reply(cleaned_messages, wellness_scores, intervention_context=intervention_context)
 
 def _care_topic_summary(messages: list[dict[str, str]]) -> str:
@@ -841,7 +875,7 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
         content = (item.get('content') or '').strip()
         if role not in {'user', 'assistant'} or not content:
             continue
-        cleaned_messages.append({'role': role, 'content': content[:1200]})
+        cleaned_messages.append({'role': role, 'content': content[:AI_MAX_MESSAGE_CHARS]})
 
     if not cleaned_messages:
         return {
@@ -855,7 +889,6 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
         return _fallback_care_chat_summary(cleaned_messages, wellness_scores)
 
     try:
-        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
         prompt = {
             'task': 'Summarize a finished care chat for a habit app history feed and provide a short event line that helps wellness scoring.',
             'rules': [
@@ -877,7 +910,7 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
                 'mood_value': 'integer 0-100',
             },
         }
-        response = client.responses.create(model=model_name, input=json.dumps(prompt, ensure_ascii=False))
+        response, _ = _responses_create_with_fallback(client, json.dumps(prompt, ensure_ascii=False))
         raw_text = (response.output_text or '').strip()
         match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         payload = json.loads(match.group(0) if match else raw_text)
@@ -899,56 +932,10 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
             'source': 'ai',
         }
     except Exception:
+        logger.warning('Care chat summary fell back to local summary', exc_info=True)
         return _fallback_care_chat_summary(cleaned_messages, wellness_scores)
 def _event_bumps(latest_event: str) -> dict[str, int]:
-    text = (latest_event or '').lower()
-    bumps = {
-        'hydration_score': 0,
-        'energy_score': 0,
-        'fitness_score': 0,
-        'focus_score': 0,
-        'mood_score': 0,
-    }
-
-    is_meal = any(word in text for word in ['breakfast', 'lunch', 'dinner', 'meal'])
-    is_hydration = any(word in text for word in ['drink', 'water', 'hydration', 'milk', 'coke', 'beverage'])
-    is_task_completion = 'completed todo' in text or 'completed meal' in text
-
-    if is_hydration:
-        if any(word in text for word in ['skip', 'dismiss', 'not_yet', 'postponed']):
-            bumps['hydration_score'] -= 3
-        else:
-            amount_match = re.search(r'(\d+)\s*ml', text)
-            amount = int(amount_match.group(1)) if amount_match else 250
-            bumps['hydration_score'] += max(2, min(8, int(round(amount / 120))))
-
-    if 'sleep' in text:
-        bumps['energy_score'] += 4
-    if any(word in text for word in ['steps', 'exercise', 'walk', 'run', 'stretch', 'yoga']):
-        bumps['fitness_score'] += 4
-    if is_meal and 'skipped' not in text:
-        bumps['energy_score'] += 4
-        bumps['fitness_score'] += 4
-    elif any(word in text for word in ['pomodoro', 'focus', 'study', 'work session']) or (is_task_completion and not is_hydration):
-        bumps['focus_score'] += 5
-    if any(word in text for word in ['journal', 'mood', 'stress', 'feeling', 'felt']):
-        bumps['mood_score'] += 3
-    if any(word in text for word in ['tired', 'anxious', 'sad', 'stress', 'stressed', 'burned out']):
-        bumps['mood_score'] -= 4
-
-    if 'care chat' in text or 'supportive chat' in text or 'support chat' in text:
-        if any(word in text for word in ['calmer', 'grounded', 'relieved', 'better', 'hopeful', 'reassured', 'steadier']):
-            bumps['mood_score'] += 4
-            bumps['focus_score'] += 2
-        if any(word in text for word in ['still distressed', 'still anxious', 'still overwhelmed', 'panicked', 'unsafe', 'hopeless', 'spiraling']):
-            bumps['mood_score'] -= 5
-            bumps['focus_score'] -= 2
-        if any(word in text for word in ['exhausted', 'drained', 'worn out', 'burned out']):
-            bumps['energy_score'] -= 2
-        if any(word in text for word in ['water', 'hydration', 'drink']) and any(word in text for word in ['grounded', 'calmer', 'better']):
-            bumps['hydration_score'] += 2
-
-    return bumps
+    return ai_score_bumps_from_impacts(infer_event_impacts(title=latest_event, description=None))
 
 
 
@@ -976,7 +963,6 @@ def _fallback_wellness_scores(
 
     water_ml = max(0, int(daily_log.get('water_ml') or 0))
     sleep_hours = max(0.0, float(daily_log.get('sleep_hours') or 0))
-    sleep_quality = str(daily_log.get('sleep_quality') or 'Average').lower()
     steps = max(0, int(daily_log.get('steps') or 0))
     exercise_minutes = max(0, int(daily_log.get('exercise_minutes') or 0))
     journal_text = ' '.join(str(daily_log.get(key) or '') for key in ['journal_text', 'activity_text', 'notes']).strip()
@@ -985,7 +971,11 @@ def _fallback_wellness_scores(
     lowered_text = journal_text.lower()
 
     hydration_anchor = _clamp_score(35 + min(water_ml / water_goal, 1.4) * 40)
-    energy_anchor = _clamp_score(35 + min(sleep_hours / sleep_goal, 1.2) * 30 + QUALITY_SCORES.get(sleep_quality, 60) * 0.20)
+    # Energy is anchored on sleep-duration-vs-goal. The legacy formula also carried a
+    # sleep_quality multiplier, but that column was never editable in the UI so every
+    # user sat on 'Average' (60 * 0.20 = +12). The +12 is folded into the base here so
+    # existing scores stay numerically identical.
+    energy_anchor = _clamp_score(47 + min(sleep_hours / sleep_goal, 1.2) * 30)
     fitness_anchor = _clamp_score(
         35
         + min(steps / step_goal, 1.2) * 25
@@ -1012,7 +1002,7 @@ def _fallback_wellness_scores(
     def blend(key: str, anchor: int, has_signal: bool):
         value = current[key]
         if has_signal:
-            value = value + (anchor - value) * 0.12
+            value = value + (anchor - value) * WELLNESS_BLEND_FACTOR
         value += bumps.get(key, 0)
         return _clamp_score(value)
 
@@ -1088,7 +1078,6 @@ def update_wellness_scores(
         return _fallback_wellness_scores(profile, daily_log, focus, todo, latest_event, current_scores=current_scores)
 
     try:
-        model_name = os.getenv('OPENAI_MODEL', 'gpt-5.4')
         prompt = {
             'task': 'Update wellness scores for a habit tracking app.',
             'rules': [
@@ -1133,7 +1122,7 @@ def update_wellness_scores(
                 'summary': 'string',
             },
         }
-        response = client.responses.create(model=model_name, input=json.dumps(prompt, ensure_ascii=False))
+        response, _ = _responses_create_with_fallback(client, json.dumps(prompt, ensure_ascii=False))
         raw_text = (response.output_text or '').strip()
         match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         payload = json.loads(match.group(0) if match else raw_text)
@@ -1160,4 +1149,5 @@ def update_wellness_scores(
             )
         return result
     except Exception:
+        logger.warning('Wellness score update fell back to local scoring', exc_info=True)
         return _fallback_wellness_scores(profile, daily_log, focus, todo, latest_event, current_scores=current_scores)

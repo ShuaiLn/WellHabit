@@ -3,12 +3,12 @@
 {% block content %}
 <section class="hero card">
     <div>
-        <span class="badge">WellHabit</span>
-        <h1>Track your water, sleep, exercise, focus time, calendar plans, and daily habits in one clean dashboard.</h1>
-        <p>Build better routines with a green WellHabit dashboard, a Tomato Clock in the center, tick-box todo lists, daily logs, and hydration reminders.</p>
+        <p class="eyebrow">WellHabit</p>
+        <h1>Track water, sleep, movement, focus, and routines in one quiet daily app.</h1>
+        <p>One visual system. One calmer surface. One clear next step at a time.</p>
         <div class="hero-actions">
-            <a class="btn primary" href="{{ url_for('register') }}">Create Account</a>
-            <a class="btn secondary" href="{{ url_for('login') }}">Log In</a>
+            <a class="btn btn-primary" href="{{ url_for('auth.register') }}">Create</a>
+            <a class="btn btn-secondary" href="{{ url_for('auth.login') }}">Log In</a>
         </div>
     </div>
 </section>

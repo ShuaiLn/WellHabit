@@ -1,6 +1,6 @@
 # WellHabit
 
-A green-themed Flask wellness dashboard with:
+A minimal Flask wellness dashboard with:
 - register / login
 - SQLite database
 - daily log for water, sleep, exercise, steps
@@ -14,8 +14,19 @@ A green-themed Flask wellness dashboard with:
 
 ## Run
 
+First, set a persistent secret key for your local environment.
+
+Windows PowerShell:
+
+```powershell
+setx FLASK_SECRET_KEY "your_long_random_secret"
+```
+
+Then install dependencies, seed local demo data if you want it, and run the app:
+
 ```bash
 pip install -r requirements.txt
+python seed_demo.py
 python app.py
 ```
 
@@ -24,6 +35,10 @@ Open:
 ```bash
 http://127.0.0.1:5000
 ```
+
+The repository and release zip do not ship with `instance/wellhabit.db`.
+If you want local demo data, seed it into your own local database with `python seed_demo.py`.
+That script recreates the three demo users with fresh passwords on each run and prints the new password once.
 
 ## Optional OpenAI setup
 
@@ -38,16 +53,25 @@ Then reopen the terminal and run the app again.
 Optional custom model:
 
 ```powershell
-setx OPENAI_MODEL "gpt-5.4"
+setx OPENAI_MODEL "gpt-4o-mini"
 ```
 
 
-For safer local configuration, you can also set a secret key and enable debug only when needed:
+For safer local configuration, set a persistent secret key for normal runs:
 
 ```powershell
 setx FLASK_SECRET_KEY "your_long_random_secret"
+```
+
+Use debug only when needed:
+
+```powershell
 setx FLASK_DEBUG "1"
 ```
+
+Behavior:
+- when `FLASK_DEBUG=1` and no secret key is set, the app generates an ephemeral secret key for that process only
+- when `FLASK_DEBUG` is not `1` and no secret key is set, the app raises an error and refuses to start
 
 
 ## Care AI boundaries and support
@@ -60,3 +84,13 @@ WellHabit's Care AI is designed for habit support.
 - If emotions feel high-risk or unsafe, contact real-person support now.
 
 The Care AI screen shows these limits in the UI, and when a care chat ends on a negative tone the app can also show a region-matched crisis support contact based on the browser's locale/time zone when available.
+
+## Packaging
+
+Create a clean release zip with:
+
+```bash
+bash scripts/package.sh
+```
+
+This removes Python cache files before packaging and excludes `instance/`, `.env`, local databases, logs, virtual environments, and IDE folders from the archive.

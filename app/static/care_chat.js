@@ -213,7 +213,7 @@
         try {
             const response = await fetch(config.messageUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.WellHabitCsrfHeaders ? window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: config.sessionId, messages, ...browserSupportContext() })
             });
             const body = await response.json().catch(() => ({}));
@@ -261,17 +261,10 @@
             ...browserSupportContext()
         });
 
-        if (useBeacon && navigator.sendBeacon) {
-            const blob = new Blob([payload], { type: 'application/json' });
-            navigator.sendBeacon(config.endUrl, blob);
-            clearState();
-            return;
-        }
-
         try {
             const response = await fetch(config.endUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.WellHabitCsrfHeaders ? window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
                 body: payload,
                 keepalive: true
             });

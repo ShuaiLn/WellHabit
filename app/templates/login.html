@@ -1,17 +1,14 @@
 {% extends 'base.html' %}
 {% block title %}Login | WellHabit{% endblock %}
 {% block content %}
-<section class="auth-card card narrow">
+<section class="card narrow">
+    <p class="eyebrow">Account</p>
     <h2>Log In</h2>
     <form method="post" class="form-grid">
-        <label>Email
-            <input type="email" name="email" required>
-        </label>
-        <label>Password
-            <input type="password" name="password" required>
-        </label>
-        <button class="btn primary" type="submit">Log In</button>
+        <label>Email<input type="email" name="email" required></label>
+        <label>Password<input type="password" name="password" required></label>
+        <button class="btn btn-primary" type="submit">Log In</button>
     </form>
-    <p class="muted">No account yet? <a href="{{ url_for('register') }}">Register here</a>.</p>
+    <p class="muted">No account yet? <a href="{{ url_for('auth.register') }}">Create one</a>.</p>
 </section>
 {% endblock %}

@@ -14,13 +14,16 @@
     const STORAGE_KEY = 'wellhabitActiveHydrationPrompt';
     const PAUSE_KEY = 'wellhabitHydrationPauseUntil';
     const SEEN_KEY = 'wellhabitSeenHydrationPromptSignatures';
+    const MISSED_SEEN_KEY = 'wellhabitSeenMissedHydrationSummaries';
     const STATUS_URL = config.statusUrl || '/hydration/status';
+    const RESPOND_URL = '/hydration/respond';
 
     if (!overlay || !titleEl || !messageEl || !beverageEl || !amountEl || !customWrap || !customEl) return;
 
     let activePrompt = null;
     let upcomingTimerId = null;
     let pendingRequest = false;
+    let missedBanner = null;
 
     function persistActivePrompt(prompt) {
         if (!prompt || !prompt.id) {
@@ -41,7 +44,8 @@
             }
             const dueAt = new Date(parsed.due_at_iso);
             const ageMs = Date.now() - dueAt.getTime();
-            if (Number.isNaN(dueAt.getTime()) || ageMs > 75 * 60 * 1000 || ageMs < -12 * 60 * 60 * 1000) {
+            const graceMinutes = Number(config.hydrationDueGraceMinutes);
+            if (Number.isNaN(dueAt.getTime()) || ageMs > graceMinutes * 60 * 1000 || ageMs < -12 * 60 * 60 * 1000) {
                 localStorage.removeItem(STORAGE_KEY);
                 return null;
             }
@@ -55,6 +59,11 @@
     function promptSignature(prompt) {
         if (!prompt || !prompt.id) return '';
         return `${prompt.id}:${prompt.due_at_iso || ''}:${prompt.response_status || ''}`;
+    }
+
+    function summarySignature(summary) {
+        if (!summary || !summary.latest_prompt_id) return '';
+        return `${summary.latest_prompt_id}:${summary.count || 0}:${summary.latest_due_at_iso || ''}`;
     }
 
     function getSeenPromptSignatures() {
@@ -79,6 +88,78 @@
         if (signatures.includes(signature)) return;
         signatures.push(signature);
         sessionStorage.setItem(SEEN_KEY, JSON.stringify(signatures.slice(-30)));
+    }
+
+    function getSeenMissedSummaries() {
+        try {
+            const raw = sessionStorage.getItem(MISSED_SEEN_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function hasSeenMissedSummary(summary) {
+        const signature = summarySignature(summary);
+        return Boolean(signature) && getSeenMissedSummaries().includes(signature);
+    }
+
+    function markMissedSummarySeen(summary) {
+        const signature = summarySignature(summary);
+        if (!signature) return;
+        const seen = getSeenMissedSummaries();
+        if (seen.includes(signature)) return;
+        seen.push(signature);
+        sessionStorage.setItem(MISSED_SEEN_KEY, JSON.stringify(seen.slice(-20)));
+    }
+
+    function ensureMissedBanner() {
+        if (missedBanner) return missedBanner;
+        const banner = document.createElement('div');
+        banner.className = 'hydration-missed-banner';
+        banner.hidden = true;
+        banner.innerHTML = `
+            <div>
+                <strong class="hydration-missed-title">Missed water reminder</strong>
+                <p class="hydration-missed-text" id="hydration-missed-text"></p>
+            </div>
+            <div class="hydration-missed-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="hydration-missed-ok-btn">Okay</button>
+            </div>
+        `;
+        document.body.appendChild(banner);
+        banner.querySelector('#hydration-missed-ok-btn')?.addEventListener('click', () => {
+            const summary = banner._summary || null;
+            if (summary) {
+                markMissedSummarySeen(summary);
+            }
+            banner.hidden = true;
+        });
+        missedBanner = banner;
+        return banner;
+    }
+
+    function renderMissedSummary(summary) {
+        const banner = ensureMissedBanner();
+        if (!summary || !summary.count) {
+            banner.hidden = true;
+            banner._summary = null;
+            return;
+        }
+
+        if (hasSeenMissedSummary(summary)) {
+            banner.hidden = true;
+            banner._summary = summary;
+            return;
+        }
+
+        const textEl = banner.querySelector('#hydration-missed-text');
+        if (textEl) {
+            textEl.textContent = summary.message || `You missed ${summary.count} water reminder${summary.count === 1 ? '' : 's'} today.`;
+        }
+        banner._summary = summary;
+        banner.hidden = false;
     }
 
     function toggleCustomInput() {
@@ -134,7 +215,7 @@
         amountEl.value = '';
         customEl.value = activePrompt.custom_beverage || '';
         toggleCustomInput();
-        setDefaultAmount(activePrompt.prompt_type);
+        setDefaultAmount(activePrompt.prompt_type || fallbackType);
         persistActivePrompt(activePrompt);
         if (!options.skipSeenMark) {
             markPromptSeen(activePrompt);
@@ -170,6 +251,8 @@
             config.morningPromptExists = body.morning_prompt_exists;
             config.morningPrompt = body.morning_prompt;
             config.upcoming = body.upcoming_prompt;
+            config.missedSummary = body.missed_summary || null;
+            renderMissedSummary(config.missedSummary);
 
             if (body.due_prompt && body.due_prompt.id) {
                 const duePrompt = body.due_prompt;
@@ -188,7 +271,7 @@
         } catch (error) {
             const stored = restoreStoredPrompt();
             if (stored && !overlay.hidden) {
-                openPrompt(stored, stored.prompt_type || 'meal_now');
+                openPrompt(stored, stored.prompt_type || 'scheduled_wake');
             }
         }
     }
@@ -217,9 +300,9 @@
 
         setButtonsDisabled(true);
         try {
-            const response = await fetch('/hydration/respond', {
+            const response = await fetch(RESPOND_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.WellHabitCsrfHeaders ? window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
 
@@ -239,6 +322,7 @@
             amountEl.value = '';
             customEl.value = '';
             closePrompt();
+            renderMissedSummary(body.missed_summary || null);
 
             if (body.avatar_emoji && window.WellHabitSetAvatarEmoji) {
                 window.WellHabitSetAvatarEmoji(body.avatar_emoji);
@@ -255,7 +339,6 @@
 
             await refreshPromptState();
             document.dispatchEvent(new CustomEvent('wellhabit:hydration-saved', { detail: body }));
-            return;
         } catch (error) {
             console.error('Hydration response failed', error);
             alert('Saving the hydration response failed. Please try again.');
@@ -263,7 +346,6 @@
             setButtonsDisabled(false);
         }
     }
-
 
     window.WellHabitHydrationStorePrompt = function (prompt) {
         persistActivePrompt(prompt);
@@ -279,6 +361,8 @@
     finishedBtn.addEventListener('click', () => sendResponse('done'));
     notYetBtn.addEventListener('click', () => sendResponse('not_yet'));
     skipBtn.addEventListener('click', () => sendResponse('skipped'));
+
+    renderMissedSummary(config.missedSummary || null);
 
     if (config.due && !hasSeenPrompt(config.due)) {
         openPrompt(config.due, config.due.prompt_type);

@@ -1,20 +1,20 @@
 {% extends 'base.html' %}
 {% block title %}Calendar | WellHabit{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div>
-        <h1>{{ display_date.strftime('%B %Y') }} Calendar</h1>
-        <p class="muted">Click a date to add an event and review the tasks saved on that day.</p>
-    </div>
-    <div class="header-actions">
-        <a class="btn secondary" href="{{ url_for('calendar_view', year=prev_year, month=prev_month, selected_date=selected_date.isoformat()) }}">Previous</a>
-        <a class="btn secondary" href="{{ url_for('calendar_view') }}">This Month</a>
-        <a class="btn secondary" href="{{ url_for('calendar_view', year=next_year, month=next_month, selected_date=selected_date.isoformat()) }}">Next</a>
-    </div>
-</section>
-
-<section class="split-grid calendar-layout">
+<section class="calendar-shell">
     <article class="card">
+        <div class="calendar-toolbar">
+            <div>
+                <p class="eyebrow">Calendar</p>
+                <h1>{{ display_date.strftime('%B %Y') }}</h1>
+            </div>
+            <div class="modal-actions">
+                <a class="btn btn-secondary" href="{{ url_for('main.calendar_view', year=prev_year, month=prev_month, selected_date=selected_date.isoformat()) }}">Previous</a>
+                <a class="btn btn-secondary" href="{{ url_for('main.calendar_view') }}">Today</a>
+                <a class="btn btn-secondary" href="{{ url_for('main.calendar_view', year=next_year, month=next_month, selected_date=selected_date.isoformat()) }}">Next</a>
+            </div>
+        </div>
+
         <div class="calendar-grid">
             <div class="calendar-weekday">Mon</div>
             <div class="calendar-weekday">Tue</div>
@@ -23,93 +23,82 @@
             <div class="calendar-weekday">Fri</div>
             <div class="calendar-weekday">Sat</div>
             <div class="calendar-weekday">Sun</div>
-
             {% for week in weeks %}
                 {% for day in week %}
-                    <a class="calendar-cell calendar-cell-link calendar-heat-cell {% if not day.in_month %}muted-cell{% endif %} {% if day.is_today %}today-cell{% endif %} {% if day.is_selected %}selected-cell{% endif %}"
-                       style="background: linear-gradient(180deg, {{ day.heat_color }} 0%, #ffffff 100%);"
-                       href="{{ url_for('calendar_view', year=day.date.year, month=day.date.month, selected_date=day.date.isoformat()) }}">
+                    <a class="calendar-cell {% if not day.in_month %}muted-cell{% endif %} {% if day.is_today %}today-cell{% endif %} {% if day.is_selected %}selected-cell{% endif %}" href="{{ url_for('main.calendar_view', year=day.date.year, month=day.date.month, selected_date=day.date.isoformat()) }}">
                         <div class="cell-date-row">
                             <div class="cell-date">{{ day.date.day }}</div>
-                            {% if day.is_selected %}<span class="mini-badge">Selected</span>{% endif %}
+                            {% if day.is_selected %}<span class="muted small">Open</span>{% endif %}
                         </div>
                         <div class="cell-tasks">
-                            {% for preview in day.event_previews %}
-                                <div class="mini-task mini-event">{{ preview }}</div>
-                            {% endfor %}
-                            {% for task in day.tasks[:2] %}
-                                <div class="mini-task {% if task.completed %}done{% endif %}">{% if task.completed %}✓ {% endif %}{{ task.title }}{% if (task.task_type or 'regular') == 'ai_suggestion' %} · AI{% endif %}</div>
-                            {% endfor %}
+                            {% for preview in day.event_previews %}<div class="mini-task">{{ preview }}</div>{% endfor %}
+                            {% for task in day.tasks[:2] %}<div class="mini-task {% if task.completed %}done{% endif %}">{% if task.completed %}✓ {% endif %}{{ task.title }}</div>{% endfor %}
                             {% set hidden_count = (day.events|length + day.tasks|length) - (day.events[:2]|length + day.tasks[:2]|length) %}
-                            {% if hidden_count > 0 %}
-                                <div class="mini-task more">+{{ hidden_count }} more</div>
-                            {% endif %}
+                            {% if hidden_count > 0 %}<div class="mini-task">+{{ hidden_count }} more</div>{% endif %}
                         </div>
+                        <span class="calendar-cell-indicator"><span style="width: {{ day.goal_percent }}%;"></span></span>
                     </a>
                 {% endfor %}
             {% endfor %}
         </div>
     </article>
 
-    <aside class="card selected-day-card">
+    <aside class="card card--compact">
         <div class="section-title-row">
             <div>
-                <p class="eyebrow">Selected Date</p>
+                <p class="eyebrow">Selected day</p>
                 <h2>{{ selected_date.strftime('%A, %B %d, %Y') }}</h2>
             </div>
-            <span class="pill">Click any day to switch</span>
+            <span class="muted small">{{ selected_finished_items|length }} saved</span>
         </div>
 
-        <form method="post" action="{{ url_for('add_event') }}" class="form-grid event-form-card">
+        <form method="post" action="{{ url_for('tasks.add_event') }}" class="form-grid">
             <input type="hidden" name="event_date" value="{{ selected_date.isoformat() }}">
-            <label>Event Title
-                <input type="text" name="title" placeholder="Add an event for this date" required>
+            <label>Event title
+                <input type="text" name="title" placeholder="Add an event" required>
             </label>
             <label>Time
                 <input type="time" name="event_time">
             </label>
-            <label class="full-width">Description
+            <label>Description
                 <textarea name="description" rows="3" placeholder="Optional details"></textarea>
             </label>
-            <button class="btn primary" type="submit">Add Event</button>
+            <button class="btn btn-secondary" type="submit">Save</button>
         </form>
 
-        <div class="selected-day-stack">
-            <div>
-                <h3>Finished Tasks</h3>
+        {% if selected_log and selected_log.journal_text %}
+            <div class="card card--muted card--compact">
+                <p class="eyebrow">Journal</p>
+                <p>{{ selected_log.journal_text }}</p>
+            </div>
+        {% endif %}
 
-            {% if selected_log and selected_log.journal_text %}
-                <div class="selected-day-journal card-lite">
-                    <h3>Journal</h3>
-                    <p>{{ selected_log.journal_text }}</p>
-                </div>
-            {% endif %}
-                <div class="todo-list selected-day-list">
-                    {% for item in selected_finished_items %}
-                        <div class="todo-item {% if item.completed %}done{% endif %} {% if item.kind == 'event' %}event-item{% endif %}">
-                            <div>
-                                <strong>{% if item.completed %}✓ {% endif %}{% if item.time_label %}{{ item.time_label }} · {% endif %}{{ item.title }}</strong>
-                                {% if item.kind == 'task' and (item.task_type or 'regular') == 'ai_suggestion' %}<p class="muted small">AI suggestion</p>{% endif %}
-                                {% if item.description %}<p>{{ item.description }}</p>{% endif %}
-                            </div>
-                            <div class="todo-actions">
-                                {% if item.kind == 'task' %}
-                                    <form method="post" action="{{ url_for('toggle_task', task_id=item.id) }}">
-                                        <button class="btn small-btn secondary" type="submit">{% if item.completed %}Undo{% else %}Done{% endif %}</button>
-                                    </form>
-                                {% endif %}
-                                <form method="post" action="{{ url_for(item.delete_endpoint, event_id=item.id) if item.kind == 'event' else url_for(item.delete_endpoint, task_id=item.id) }}">
-                                    <button class="btn small-btn danger" type="submit">Delete</button>
-                                </form>
-                            </div>
+        <div class="selected-day-stack">
+            <h3>Saved items</h3>
+            <div class="todo-list selected-day-list">
+                {% for item in selected_finished_items %}
+                    <div class="todo-item {% if item.completed %}done{% endif %} {% if item.kind == 'event' %}event-item{% endif %}">
+                        <div>
+                            <strong>{% if item.completed %}✓ {% endif %}{% if item.time_label %}{{ item.time_label }} · {% endif %}{{ item.title }}</strong>
+                            {% if item.description %}<p class="muted small">{{ item.description }}</p>{% endif %}
                         </div>
-                    {% else %}
-                        <p class="muted">No finished tasks on this date yet.</p>
-                    {% endfor %}
-                </div>
+                        <div class="modal-actions">
+                            {% if item.kind == 'task' %}
+                                <form method="post" action="{{ url_for(item.delete_endpoint, task_id=item.id) if item.kind == 'task' else url_for(item.delete_endpoint, event_id=item.id) }}">
+                                    <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
+                                </form>
+                            {% else %}
+                                <form method="post" action="{{ url_for(item.delete_endpoint, event_id=item.id) }}">
+                                    <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% else %}
+                    <p class="muted">No finished tasks on this date yet.</p>
+                {% endfor %}
             </div>
         </div>
     </aside>
 </section>
-
 {% endblock %}

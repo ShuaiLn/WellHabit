@@ -1,320 +1,278 @@
 {% extends 'base.html' %}
 {% block title %}Profile | WellHabit{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div>
+<section class="profile-shell">
+    <div class="page-header">
         <div class="profile-header-line">
             <span class="profile-avatar-hero">{{ current_user.avatar_emoji or '🙂' }}</span>
             <div>
-                <h1>{{ current_user.username }}'s Profile</h1>
-                <p class="muted">Your scores, streaks, goals, daily stats, and emotion trends live here.</p>
+                <h1>{{ current_user.username }} · Profile</h1>
+                <p class="muted">Basic information, goals, and schedule live here in three smaller sections.</p>
             </div>
+        </div>
+        <div class="tabs" id="profile-tabs">
+            <button class="tab-button is-active" type="button" data-tab="basic">Basic</button>
+            {% if profile_locked %}
+            <button class="tab-button" type="button" data-tab="goals">Goals</button>
+            <button class="tab-button" type="button" data-tab="schedule">Schedule</button>
+            {% endif %}
         </div>
     </div>
-</section>
 
-{% if profile_locked %}
-<section class="profile-sticky-layout">
-    <aside class="floating-panel profile-goals-panel">
-        <div class="section-title-row compact-head">
-            <div>
-                <p class="eyebrow">AI Goals</p>
-                <h2>Daily Targets</h2>
-            </div>
-        </div>
-        <p class="muted small profile-panel-time">Sleep by {{ current_user.optimal_bedtime or '22:00' }} · Wake at {{ current_user.optimal_wake_time or '07:00' }}</p>
+    {% if profile_locked %}
+    <section class="tab-panel is-active" id="tab-basic">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Basic</p>
+                    <h2>Personal data</h2>
+                    <div class="data-list">
+                        <div class="data-row"><strong>Age</strong><span>{{ current_user.age or '—' }}</span></div>
+                        <div class="data-row"><strong>Weight</strong><span>{{ current_user.weight_kg or '—' }} kg</span></div>
+                        <div class="data-row"><strong>Height</strong><span>{{ current_user.height_cm or '—' }} cm</span></div>
+                        <div class="data-row"><strong>Gender</strong><span>{{ (current_user.gender_identity or 'prefer_not_say').replace('_', ' ').title() }}</span></div>
+                    </div>
+                </article>
 
-        <div class="profile-note-box progress-box-tight">
-            <div class="section-title-row compact-head">
-                <div>
-                    <p class="eyebrow">Goal Progress</p>
-                </div>
-                <span class="pill intensity-pill intensity-{{ (current_user.goal_progress_intensity or 'medium').lower() }}">{{ (current_user.goal_progress_intensity or 'medium').title() }}</span>
-            </div>
-            <div class="wellness-bars compact-progress-stack">
-                {% for item in progress_cards %}
-                    <article class="wellness-row compact-progress-row {% if item.glass_progress %}expandable-progress-row{% endif %}">
-                        <div class="wellness-row-head compact-progress-head">
-                            <strong>{{ item.label }}</strong>
-                            {% if item.glass_progress %}
-                                <button class="progress-inline-toggle" type="button" data-progress-target="water-glass-progress" aria-expanded="false">
-                                    <span>{{ item.value }}</span>
-                                    <small>{{ item.toggle_hint }}</small>
-                                </button>
-                            {% else %}
-                                <span>{{ item.value }}</span>
-                            {% endif %}
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" style="width: {{ item.percent }}%;"></div>
-                        </div>
-                        {% if item.glass_progress %}
-                            <div class="glass-progress-panel" id="water-glass-progress" hidden>
-                                <div class="glass-progress-head">
-                                    <strong>{{ item.glass_progress.current_display }} / {{ item.glass_progress.total_display }}</strong>
-                                    <span>{{ item.glass_progress.remaining_text }}</span>
-                                </div>
-                                <div class="glass-segment-row">
-                                    {% for segment in item.glass_progress.segments %}
-                                        <span class="glass-segment {{ segment.state }}" title="Glass {{ segment.index }}">
-                                            <span class="glass-segment-fill" style="width: {{ segment.fill_percent }}%;"></span>
-                                        </span>
-                                    {% endfor %}
-                                </div>
-                                <p class="muted small">1 glass = 250 ml</p>
-                            </div>
-                        {% endif %}
-                    </article>
-                {% endfor %}
-            </div>
-        </div>
-
-        <div class="profile-note-box profile-target-overview-box">
-            <div class="section-title-row compact-head">
-                <div>
-                    <p class="eyebrow">AI Goals</p>
-                    <h3>Target Overview</h3>
-                </div>
-            </div>
-            <div class="goal-card-grid sidebar-goal-grid">
-                {% for goal in goal_cards %}
-                    <article class="mini-stat-card compact-stat-card">
-                        <span class="stat-label">{{ goal.label }}</span>
-                        <strong>{{ goal.value }}</strong>
-                        {% if goal.subtitle %}<small class="muted">{{ goal.subtitle }}</small>{% endif %}
-                    </article>
-                {% endfor %}
-            </div>
-        </div>
-
-        <div class="profile-note-box goal-editor-box">
-            <div class="section-title-row compact-head">
-                <div>
-                    <p class="eyebrow">Goal Progress</p>
-                    <h3>Daily Training Intensity</h3>
-                </div>
-            </div>
-            <form method="post" class="goal-editor-form">
-                <input type="hidden" name="action" value="update_goal_intensity">
-                <label>
-                    Intensity
-                    <select name="goal_progress_intensity">
-                        {% for value, label in goal_intensity_choices %}
-                            <option value="{{ value }}" {% if (current_user.goal_progress_intensity or 'medium') == value %}selected{% endif %}>{{ label }}</option>
+                <article class="card">
+                    <p class="eyebrow">Today</p>
+                    <h2>Quick numbers</h2>
+                    <div class="metrics-inline">
+                        {% for stat in quick_stats_cards %}
+                            <article class="metric">
+                                <strong>{{ stat.value }}</strong>
+                                <span>{{ stat.label }}</span>
+                            </article>
                         {% endfor %}
-                    </select>
-                </label>
-                <p class="muted small">This controls the overall goal progress intensity view: easy, medium, or hard.</p>
-                <button class="btn secondary full-width" type="submit">Update intensity</button>
-            </form>
-        </div>
+                    </div>
+                </article>
+            </div>
 
-        <div class="profile-note-box goal-editor-box">
-            <div class="section-title-row compact-head">
-                <div>
-                    <p class="eyebrow">Hydration Schedule</p>
-                    <h3>Daily Water Reminder Times</h3>
-                </div>
-            </div>
-            <div class="compact-progress-stack hydration-schedule-list">
-                {% for row in hydration_schedule_rows %}
-                    <article class="wellness-row compact-progress-row">
-                        <div class="wellness-row-head compact-progress-head">
-                            <strong>{{ row.label }}</strong>
-                            <span>{{ row.display_time }}</span>
-                        </div>
-                    </article>
-                {% endfor %}
-            </div>
-            {% if hydration_goal_plan %}
-                <div class="profile-note-box hydration-auto-plan-box">
-                    <p class="muted small">{{ hydration_goal_plan.preview_text }}</p>
-                    {% if hydration_goal_plan.extra_rows %}
-                        <div class="compact-progress-stack hydration-schedule-list">
-                            {% for row in hydration_goal_plan.extra_rows %}
-                                <article class="wellness-row compact-progress-row">
-                                    <div class="wellness-row-head compact-progress-head">
-                                        <strong>{{ row.label }}</strong>
-                                        <span>{{ row.display_time }}</span>
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Live</p>
+                    <h2>Wellness</h2>
+                    <div class="progress-grid">
+                        {% for metric in wellness_metrics %}
+                            <article class="wellness-row metric-{{ metric.key }}">
+                                <div class="wellness-row-head">
+                                    <div>
+                                        <strong>{{ metric.label }}</strong>
+                                        <span>{{ metric.subtitle }}</span>
                                     </div>
-                                </article>
+                                    <div class="wellness-score-value">{{ metric.value }}/100</div>
+                                </div>
+                                <div class="progress-track"><div class="progress-fill metric-{{ metric.key }}" style="width: {{ metric.value }}%;"></div></div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+
+                <details class="details-block">
+                    <summary>Mood history</summary>
+                    <div class="details-content">
+                        <div class="mood-chart-wrap">
+                            <svg class="mood-chart" id="mood-chart" viewBox="0 0 700 220" preserveAspectRatio="none" data-points='{{ mood_trend.points|tojson }}'>
+                                <g id="mood-chart-grid"></g>
+                                <path id="mood-chart-line" d="" fill="none" stroke="#6a7a5c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <g id="mood-chart-points"></g>
+                            </svg>
+                        </div>
+                        <div class="mood-chart-labels">
+                            {% for point in mood_trend.points %}<span>{{ point.short_date }}</span>{% endfor %}
+                        </div>
+                        <div class="mood-recent-list">
+                            {% for entry in mood_trend.recent_entries %}
+                                <div class="mood-recent-item">
+                                    <span class="mood-dot" style="background: {{ entry.color }};"></span>
+                                    <div>
+                                        <strong>{{ entry.display }}</strong>
+                                        <p class="muted small">{{ entry.event_at.strftime('%m/%d %H:%M') }} · {{ entry.source }}</p>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <p class="muted">No mood records yet.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-goals">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Goals</p>
+                    <h2>Targets</h2>
+                    <div class="metrics-inline">
+                        {% for goal in goal_cards %}
+                            <article class="metric">
+                                <strong>{{ goal.value }}</strong>
+                                <span>{{ goal.label }}</span>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Progress</p>
+                    <h2>Today</h2>
+                    <div class="progress-grid">
+                        {% for item in progress_cards %}
+                            <article class="wellness-row">
+                                <div class="wellness-row-head">
+                                    <strong>{{ item.label }}</strong>
+                                    <span>{{ item.value }}</span>
+                                </div>
+                                <div class="progress-track"><div class="progress-fill metric-{{ item.key }}" style="width: {{ item.percent }}%;"></div></div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Streaks</p>
+                    <h2>Current run</h2>
+                    <div class="metrics-inline">
+                        {% for streak in streak_cards %}
+                            <article class="metric">
+                                <strong>{{ streak.value }}</strong>
+                                <span>{{ streak.label }}</span>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Intensity</p>
+                    <h2>Goal progress view</h2>
+                    <form method="post" class="form-grid">
+                        <input type="hidden" name="action" value="update_goal_intensity">
+                        <label>Intensity
+                            <select name="goal_progress_intensity">
+                                {% for value, label in goal_intensity_choices %}
+                                    <option value="{{ value }}" {% if (current_user.goal_progress_intensity or 'medium') == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button class="btn btn-secondary" type="submit">Save</button>
+                    </form>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-schedule">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Sleep</p>
+                    <h2>Daily rhythm</h2>
+                    <div class="data-list">
+                        <div class="schedule-row"><strong>Bedtime</strong><span>{{ current_user.optimal_bedtime or '22:00' }}</span></div>
+                        <div class="schedule-row"><strong>Wake time</strong><span>{{ current_user.optimal_wake_time or '07:00' }}</span></div>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Hydration</p>
+                    <h2>Anchor reminders</h2>
+                    <div class="data-list">
+                        {% for row in hydration_schedule_rows %}
+                            <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Today</p>
+                    <h2>Remaining reminder plan</h2>
+                    {% if hydration_goal_plan %}
+                        <p class="muted">{{ hydration_goal_plan.preview_text }}</p>
+                        <div class="data-list">
+                            {% for row in hydration_goal_plan.active_fixed_rows %}
+                                <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
+                            {% endfor %}
+                            {% for row in hydration_goal_plan.extra_rows %}
+                                <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
                             {% endfor %}
                         </div>
                     {% else %}
-                        <p class="muted small">No extra water reminders are needed right now.</p>
+                        <p class="muted">No extra water reminders are needed right now.</p>
                     {% endif %}
-                </div>
-            {% endif %}
-            <form method="post" class="goal-editor-form hydration-time-form">
-                <input type="hidden" name="action" value="update_hydration_schedule">
-                {% for row in hydration_schedule_rows %}
-                    <label>
-                        {{ row.label }}
-                        <input type="time" name="{{ row.field_name }}" value="{{ row.time_text }}">
-                    </label>
-                {% endfor %}
-                <p class="muted small">These four times are anchor reminders. WellHabit can also place extra water reminders later in the day when your remaining goal will not be covered by the anchor glasses alone.</p>
-                <button class="btn secondary full-width" type="submit">Update water reminder times</button>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Edit</p>
+                    <h2>Reminder times</h2>
+                    <form method="post" class="form-grid two-columns">
+                        <input type="hidden" name="action" value="update_hydration_schedule">
+                        {% for row in hydration_schedule_rows %}
+                            <label>
+                                {{ row.label }}
+                                <input type="time" name="{{ row.field_name }}" value="{{ row.time_text }}">
+                            </label>
+                        {% endfor %}
+                        <button class="btn btn-secondary full-width" type="submit">Save</button>
+                    </form>
+                </article>
+            </div>
+        </div>
+    </section>
+    {% else %}
+    <section class="tab-panel is-active" id="tab-basic">
+        <article class="card narrow">
+            <p class="eyebrow">Step 1 of 3</p>
+            <h2>Set up Basic to unlock the rest</h2>
+            <p class="muted">Step 1 of 3 · Fill your basic information to unlock Goals and Schedule.</p>
+            <form method="post" class="form-grid two-columns">
+                <label>Age
+                    <input type="number" name="age" min="1" value="{{ current_user.age or '' }}" placeholder="17">
+                </label>
+                <label>Weight (kg)
+                    <input type="number" name="weight_kg" min="1" step="0.1" value="{{ current_user.weight_kg or '' }}" placeholder="60">
+                </label>
+                <label>Gender
+                    <select name="gender_identity">
+                        <option value="female" {% if current_user.gender_identity == 'female' %}selected{% endif %}>Female</option>
+                        <option value="male" {% if current_user.gender_identity == 'male' %}selected{% endif %}>Male</option>
+                        <option value="non_binary" {% if current_user.gender_identity == 'non_binary' %}selected{% endif %}>Non-binary</option>
+                        <option value="prefer_not_say" {% if current_user.gender_identity in [None, '', 'prefer_not_say'] %}selected{% endif %}>Prefer not to say</option>
+                    </select>
+                </label>
+                <label>Height (cm)
+                    <input type="number" name="height_cm" min="1" step="0.1" value="{{ current_user.height_cm or '' }}" placeholder="170">
+                </label>
+                <button class="btn btn-primary full-width" type="submit">Save</button>
             </form>
-        </div>
-    </aside>
-
-    <div class="profile-main-stack">
-        <section class="card profile-summary-card">
-            <div class="section-title-row">
-                <div>
-                    <p class="eyebrow">Quick Stats</p>
-                    <h2>Today</h2>
-                </div>
-            </div>
-            <div class="goal-card-grid four-up-grid">
-                {% for stat in quick_stats_cards %}
-                    <article class="mini-stat-card compact-stat-card">
-                        <span class="stat-label">{{ stat.label }}</span>
-                        <strong>{{ stat.value }}</strong>
-                    </article>
-                {% endfor %}
-            </div>
-        </section>
-
-        <section class="card profile-summary-card">
-            <div class="section-title-row">
-                <div>
-                    <p class="eyebrow">Current Streaks</p>
-                    <h2>Goal Streaks</h2>
-                </div>
-            </div>
-            <div class="goal-card-grid streak-card-grid">
-                {% for streak in streak_cards %}
-                    <article class="mini-stat-card compact-stat-card streak-card">
-                        <span class="stat-label">{{ streak.label }}</span>
-                        <strong>{{ streak.value }} day{% if streak.value != 1 %}s{% endif %}</strong>
-                        <small class="muted">{{ streak.subtitle }}</small>
-                    </article>
-                {% endfor %}
-            </div>
-        </section>
-
-        <section class="card profile-summary-card">
-            <div class="section-title-row">
-                <div>
-                    <p class="eyebrow">Live Scores</p>
-                    <h2>Wellness Overview</h2>
-                </div>
-            </div>
-
-            <div class="wellness-bars">
-                {% for metric in wellness_metrics %}
-                    <article class="wellness-row metric-{{ metric.key }}">
-                        <div class="wellness-row-head">
-                            <div>
-                                <strong>{{ metric.label }}</strong>
-                                <span>{{ metric.subtitle }}</span>
-                            </div>
-                            <div class="wellness-score-value">{{ metric.value }}/100</div>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill metric-{{ metric.key }}" style="width: {{ metric.value }}%;"></div>
-                        </div>
-                    </article>
-                {% endfor %}
-            </div>
-
-            {% if current_user.wellness_summary %}
-                <div class="profile-note-box">
-                    <p class="eyebrow">AI Wellness Note</p>
-                    <p>{{ current_user.wellness_summary }}</p>
-                </div>
-            {% endif %}
-
-            <div class="profile-note-box mood-trend-card">
-                <div class="section-title-row compact-head">
-                    <div>
-                        <p class="eyebrow">Emotion Trend</p>
-                        <h3>Last {{ mood_trend.points|length }} days</h3>
-                    </div>
-                    {% if mood_trend.latest %}
-                        <span class="pill">Latest: {{ mood_trend.latest.display }}</span>
-                    {% endif %}
-                </div>
-                <div class="mood-chart-wrap">
-                    <svg class="mood-chart" id="mood-chart" viewBox="0 0 700 220" preserveAspectRatio="none" data-points='{{ mood_trend.points|tojson }}'>
-                        <g id="mood-chart-grid"></g>
-                        <path id="mood-chart-line" d="" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></path>
-                        <g id="mood-chart-points"></g>
-                    </svg>
-                </div>
-                <div class="mood-chart-labels">
-                    {% for point in mood_trend.points %}
-                        <span>{{ point.short_date }}</span>
-                    {% endfor %}
-                </div>
-                <div class="mood-recent-list">
-                    {% for entry in mood_trend.recent_entries %}
-                        <div class="mood-recent-item">
-                            <span class="mood-dot" style="background: {{ entry.color }};"></span>
-                            <div>
-                                <strong>{{ entry.display }}</strong>
-                                <p class="muted small">{{ entry.event_at.strftime('%m/%d %H:%M') }} · {{ entry.source }}</p>
-                                {% if entry.summary %}<p class="muted small">{{ entry.summary }}</p>{% endif %}
-                            </div>
-                        </div>
-                    {% else %}
-                        <p class="muted">No mood records yet.</p>
-                    {% endfor %}
-                </div>
-            </div>
-
-            {% if latest_log %}
-                <div class="profile-note-box">
-                    <p class="eyebrow">Latest Log Snapshot</p>
-                    <p>{{ latest_log.log_date }} · {{ latest_log.water_ml }} ml water · {{ latest_log.sleep_hours }} h sleep · {{ latest_log.steps }} steps · {{ latest_log.exercise_minutes }} min exercise</p>
-                </div>
-            {% endif %}
-        </section>
-    </div>
+        </article>
+    </section>
+    {% endif %}
 </section>
-{% else %}
-<section class="split-grid profile-layout">
-    <article class="card profile-form-card">
-        <div class="section-title-row">
-            <div>
-                <p class="eyebrow">Personal Data</p>
-                <h2>Basic Information</h2>
-            </div>
-        </div>
-        <form method="post" class="form-grid two-columns">
-            <label>Age
-                <input type="number" name="age" min="1" value="{{ current_user.age or '' }}" placeholder="17">
-            </label>
-            <label>Weight (kg)
-                <input type="number" name="weight_kg" min="1" step="0.1" value="{{ current_user.weight_kg or '' }}" placeholder="60">
-            </label>
-            <label>Gender
-                <select name="gender_identity">
-                    <option value="female" {% if current_user.gender_identity == 'female' %}selected{% endif %}>Female</option>
-                    <option value="male" {% if current_user.gender_identity == 'male' %}selected{% endif %}>Male</option>
-                    <option value="non_binary" {% if current_user.gender_identity == 'non_binary' %}selected{% endif %}>Non-binary</option>
-                    <option value="prefer_not_say" {% if current_user.gender_identity in [None, '', 'prefer_not_say'] %}selected{% endif %}>Prefer not to say</option>
-                </select>
-            </label>
-            <label>Height (cm)
-                <input type="number" name="height_cm" min="1" step="0.1" value="{{ current_user.height_cm or '' }}" placeholder="170">
-            </label>
-            <div class="full-width goal-note-box">
-                <p class="eyebrow">AI Goal Setting</p>
-                <p class="muted">You enter age, weight, height, and optional gender. WellHabit then sets Daily Water Goal (ml), Sleep Goal (hours), Step Goal, and a recommended bedtime / wake-up time automatically.</p>
-            </div>
-            <button class="btn primary full-width" type="submit">Save Once and Generate Goals</button>
-        </form>
-    </article>
-</section>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
+    const buttons = Array.from(document.querySelectorAll('#profile-tabs .tab-button'));
+    const panels = {
+        basic: document.getElementById('tab-basic'),
+        goals: document.getElementById('tab-goals'),
+        schedule: document.getElementById('tab-schedule'),
+    };
+    function activate(tab) {
+        buttons.forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
+        Object.entries(panels).forEach(([key, panel]) => panel?.classList.toggle('is-active', key === tab));
+    }
+    buttons.forEach((button) => button.addEventListener('click', () => activate(button.dataset.tab)));
+    activate('basic');
+
     document.querySelectorAll('[data-progress-target]').forEach((btn) => {
         btn.addEventListener('click', () => {
             const target = document.getElementById(btn.dataset.progressTarget);
@@ -330,15 +288,9 @@
     const pointsWrap = document.getElementById('mood-chart-points');
     const gridWrap = document.getElementById('mood-chart-grid');
     if (!svg || !line || !pointsWrap || !gridWrap) return;
-
     let points = [];
-    try {
-        points = JSON.parse(svg.dataset.points || '[]');
-    } catch (error) {
-        points = [];
-    }
+    try { points = JSON.parse(svg.dataset.points || '[]'); } catch (error) { points = []; }
     if (!points.length) return;
-
     const width = 700;
     const height = 220;
     const left = 16;
@@ -346,38 +298,26 @@
     const top = 16;
     const bottom = height - 26;
     const span = Math.max(1, points.length - 1);
-
     [25, 50, 75, 100].forEach((level) => {
         const y = bottom - ((level / 100) * (bottom - top));
         const guide = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        guide.setAttribute('x1', String(left));
-        guide.setAttribute('x2', String(right));
-        guide.setAttribute('y1', String(y));
-        guide.setAttribute('y2', String(y));
-        guide.setAttribute('class', 'mood-chart-guide');
-        gridWrap.appendChild(guide);
+        guide.setAttribute('x1', String(left)); guide.setAttribute('x2', String(right));
+        guide.setAttribute('y1', String(y)); guide.setAttribute('y2', String(y));
+        guide.setAttribute('class', 'mood-chart-guide'); gridWrap.appendChild(guide);
     });
-
     const d = points.map((point, index) => {
         const x = left + ((right - left) * (index / span));
         const y = bottom - ((Number(point.value || 0) / 100) * (bottom - top));
-        point._x = x;
-        point._y = y;
-        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+        point._x = x; point._y = y; return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
     }).join(' ');
     line.setAttribute('d', d);
-
     points.forEach((point) => {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', String(point._x));
-        circle.setAttribute('cy', String(point._y));
-        circle.setAttribute('r', '4.5');
-        circle.setAttribute('fill', point.color || '#8b5cf6');
-        circle.setAttribute('class', 'mood-chart-point');
+        circle.setAttribute('cx', String(point._x)); circle.setAttribute('cy', String(point._y));
+        circle.setAttribute('r', '4.5'); circle.setAttribute('fill', point.color || '#6a7a5c');
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
         title.textContent = `${point.short_date}: ${point.display} (${point.value}/100)`;
-        circle.appendChild(title);
-        pointsWrap.appendChild(circle);
+        circle.appendChild(title); pointsWrap.appendChild(circle);
     });
 })();
 </script>
