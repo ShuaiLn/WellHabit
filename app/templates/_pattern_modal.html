@@ -1,0 +1,47 @@
+{% for pattern in active_pattern_cards %}
+<div class="habit-modal-overlay pattern-modal-overlay" id="pattern-modal-{{ pattern.id }}" hidden>
+    <div class="modal pattern-modal" role="dialog" aria-modal="true" aria-labelledby="pattern-modal-title-{{ pattern.id }}">
+        <p class="eyebrow">Pattern support</p>
+        <h2 id="pattern-modal-title-{{ pattern.id }}">{{ pattern.display_name }}</h2>
+        <p class="muted">{{ pattern.headline }}</p>
+        <div class="pattern-modal-body">
+            <div class="pattern-score-line">
+                <span>Trigger score</span>
+                <strong>{{ pattern.score }}/{{ pattern.threshold }}</strong>
+            </div>
+            {% if pattern.evidence %}
+            <div>
+                <strong>Why it appeared</strong>
+                <ul class="pattern-evidence-list">
+                    {% for item in pattern.evidence %}
+                        <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            <div class="pattern-intervention-box">
+                <strong>{{ pattern.intervention_title }}</strong>
+                <p>{{ pattern.intervention_detail }}</p>
+            </div>
+            <p class="muted small">Habit support only. This is not medical advice, therapy, or a clinical metric.</p>
+            <p class="pattern-ajax-message muted small" data-pattern-message hidden></p>
+        </div>
+        <div class="modal-actions pattern-modal-actions">
+            <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="action" value="finished">
+                <label class="pattern-rating-label">Feel better? <input type="number" name="rating" min="1" max="10" placeholder="1-10"></label>
+                <button class="btn btn-primary" type="submit">Finished</button>
+            </form>
+            <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="action" value="not_yet">
+                <button class="btn btn-secondary" type="submit">Not yet</button>
+            </form>
+            <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="action" value="no_thanks">
+                <button class="btn btn-ghost" type="submit">No thanks</button>
+            </form>
+            <button class="btn btn-ghost pattern-close-btn" type="button" data-pattern-close>Close</button>
+        </div>
+    </div>
+</div>
+{% endfor %}

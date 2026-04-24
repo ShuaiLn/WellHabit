@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}WellHabit{% endblock %}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-ui-release="{{ app_ui_defaults.ui_release }}">
+    <nav class="navbar">
+        <div class="container nav-inner">
+            <div class="nav-left-zone">
+                <a class="brand" href="{{ url_for('auth.index') }}">WellHabit</a>
+            </div>
+            <div class="nav-right-zone">
+                <div class="nav-clock" id="nav-local-time-wrap">
+                    <div class="nav-clock-stack">
+                        <strong id="nav-local-time">{{ nav_local_time }}</strong>
+                        <span>{{ nav_local_date }}</span>
+                    </div>
+                </div>
+                <div class="nav-links">
+                    {% if current_user.is_authenticated %}
+                        <a href="{{ url_for('main.dashboard') }}">Home</a>
+                        <a href="{{ url_for('main.logs') }}">Logs</a>
+                        <a href="{{ url_for('main.calendar_view') }}">Calendar</a>
+                        <a href="{{ url_for('main.dashboard', panel='care') }}" data-nav-care="1">Care AI</a>
+                        <a href="{{ url_for('main.history_view') }}">History</a>
+                        <a href="{{ url_for('main.profile') }}">Profile</a>
+                        <a href="{{ url_for('auth.logout') }}">Logout</a>
+                    {% else %}
+                        <a href="{{ url_for('auth.login') }}">Login</a>
+                        <a href="{{ url_for('auth.register') }}">Register</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    {% if current_user.is_authenticated %}
+    <div class="global-timer-widget" id="global-timer-widget" hidden>
+        <button class="global-timer-mini-toggle" id="global-timer-mini-toggle" type="button" aria-expanded="true" title="Minimize timer">◔</button>
+        <div class="global-timer-mini-face" id="global-timer-mini-face" hidden>
+            <span class="global-timer-mini-avatar" id="global-timer-mini-avatar">{{ current_avatar_emoji or current_user.avatar_emoji or '🙂' }}</span>
+            <strong id="global-timer-mini-time">{{ "%02d:00"|format(app_ui_defaults.focus_minutes) }}</strong>
+            <span class="global-timer-mini-caption">focus left</span>
+        </div>
+        <div class="global-timer-full" id="global-timer-full">
+            <div class="global-timer-head">
+                <div class="global-timer-drag-zone" id="global-timer-drag-zone">
+                    <p class="global-timer-kicker">Tomato Clock</p>
+                    <strong id="global-timer-mode">Focus</strong>
+                </div>
+                <span class="global-timer-avatar" id="global-timer-avatar">{{ current_avatar_emoji or current_user.avatar_emoji or '🙂' }}</span>
+            </div>
+            <div class="global-timer-time" id="global-timer-time">{{ "%02d:00"|format(app_ui_defaults.focus_minutes) }}</div>
+            <div class="global-timer-activity" id="global-timer-activity">{{ app_ui_defaults.activity_label }}</div>
+            <p class="global-timer-status" id="global-timer-status">Running</p>
+            <div class="global-timer-footer"><a href="{{ url_for('main.dashboard') }}" class="global-timer-link">Open</a></div>
+        </div>
+    </div>
+    {% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="sleep-reminder-overlay" id="sleep-reminder-overlay" hidden>
+    <div class="card card--compact">
+        <p class="eyebrow">Sleep reminder</p>
+        <h2>It is your suggested bedtime.</h2>
+        <p class="muted" id="sleep-reminder-message">Best bedtime is now. Your suggested wake-up time will be shown here.</p>
+        <div class="sleep-reminder-actions">
+            <button class="btn btn-secondary btn-sm" type="button" id="sleep-reminder-later-btn">30 min</button>
+            <button class="btn btn-primary btn-sm" type="button" id="sleep-reminder-ok-btn">Okay</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="eye-exercise-overlay" id="eye-exercise-overlay" hidden>
+    <div class="modal">
+        <p class="eyebrow">Eye exercise</p>
+        <h2>Time to rest your eyes</h2>
+        <p class="muted" id="eye-exercise-message">You've focused for {{ app_ui_defaults.eye_exercise_threshold_minutes }} minutes. Do you want to do an eye exercise now?</p>
+        <p class="eye-exercise-source" id="eye-exercise-source">Source: YouTube · lenstark.com</p>
+        <div class="eye-exercise-video-wrap" id="eye-exercise-video-wrap" hidden>
+            <iframe id="eye-exercise-iframe" src="" title="Eye exercise video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+        </div>
+        <div class="modal-actions" id="eye-exercise-actions">
+            <button class="btn btn-primary" type="button" id="eye-exercise-yes-btn">Yes</button>
+            <button class="btn btn-secondary" type="button" id="eye-exercise-not-yet-btn">Not Yet</button>
+            <button class="btn btn-danger" type="button" id="eye-exercise-no-thanks-btn">Skip</button>
+        </div>
+        <div class="modal-actions" id="eye-exercise-finished-wrap" hidden>
+            <button class="btn btn-primary" type="button" id="eye-exercise-finished-btn">Done</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="wellness-feedback-overlay" id="wellness-feedback-overlay" hidden>
+    <div class="card card--compact" role="dialog" aria-modal="true" aria-labelledby="wellness-feedback-title">
+        <div class="wellness-feedback-main">
+            <p class="eyebrow" id="wellness-feedback-eyebrow">Wellness update</p>
+            <h2 id="wellness-feedback-title">Scores updated</h2>
+            <p class="muted" id="wellness-feedback-message">Your wellness scores were refreshed.</p>
+            <div class="wellness-feedback-mood" id="wellness-feedback-mood-wrap" hidden>
+                <span class="pill" id="wellness-feedback-mood-pill">Mood</span>
+            </div>
+            <div class="wellness-feedback-summary-box" id="wellness-feedback-summary-wrap" hidden>
+                <p class="eyebrow">Summary</p>
+                <p id="wellness-feedback-summary-text"></p>
+            </div>
+            <details class="wellness-feedback-boundary-box" id="wellness-feedback-boundary-wrap" hidden>
+                <summary class="wellness-feedback-disclosure">Limits</summary>
+                <ul class="wellness-feedback-boundary-list" id="wellness-feedback-boundary-list"></ul>
+            </details>
+            <div class="wellness-feedback-support-box" id="wellness-feedback-support-wrap" hidden>
+                <p class="eyebrow" id="wellness-feedback-support-title">Real-person support</p>
+                <p id="wellness-feedback-support-contact"></p>
+                <p class="muted small" id="wellness-feedback-support-chat"></p>
+                <p class="muted small" id="wellness-feedback-support-urgent"></p>
+            </div>
+        </div>
+        <div class="wellness-feedback-footer care-end-footer">
+            <div class="wellness-feedback-metrics" id="wellness-feedback-metrics"></div>
+            <div class="wellness-feedback-actions"><button class="btn btn-ghost btn-sm" type="button" id="wellness-feedback-ok-btn">Close</button></div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="ai-suggestion-followup-overlay" id="ai-suggestion-followup-overlay" hidden>
+    <div class="modal">
+        <p class="eyebrow">AI suggestion follow-up</p>
+        <h2>How much better do you feel now?</h2>
+        <p class="muted" id="ai-suggestion-followup-task">Completed task</p>
+        <p class="muted" id="ai-suggestion-followup-question">After doing this AI suggestion, how much better do you feel out of 10 regarding the negativity detected earlier?</p>
+        <div class="ai-suggestion-rating-grid" id="ai-suggestion-rating-grid"></div>
+        <div class="modal-actions"><button class="btn btn-secondary" type="button" id="ai-suggestion-followup-later-btn">Later</button></div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<div class="wellness-feedback-overlay" id="ai-suggestion-added-overlay" hidden>
+    <div class="card card--compact">
+        <p class="eyebrow">AI suggestion added</p>
+        <h2 id="ai-suggestion-added-title">A new AI suggestion was added</h2>
+        <p class="muted" id="ai-suggestion-added-detail">Added to today's todo list.</p>
+        <div class="wellness-feedback-actions"><button class="btn btn-ghost btn-sm" type="button" id="ai-suggestion-added-ok-btn">Close</button></div>
+    </div>
+</div>
+{% endif %}
+
+    <main class="container page">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-stack">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    {% if current_user.is_authenticated %}
+        {% include '_hydration_modal.html' %}
+    {% endif %}
+
+
+    <script nonce="{{ csp_nonce }}">
+    window.WELLHABIT_BOOTSTRAP = {
+        authenticated: {{ current_user.is_authenticated|tojson }},
+        avatarEmoji: {{ ((current_avatar_emoji or current_user.avatar_emoji) if current_user.is_authenticated else '🙂')|tojson }},
+        pendingWellnessFeedback: {{ pending_wellness_feedback|tojson if pending_wellness_feedback else 'null' }},
+        pendingAiSuggestionFollowup: {{ pending_ai_suggestion_followup|tojson if pending_ai_suggestion_followup else 'null' }},
+        pendingAiSuggestionAdded: {{ pending_ai_suggestion_added|tojson if pending_ai_suggestion_added else 'null' }},
+        prompts: {{ {
+            'hydrationDueGraceMinutes': app_ui_defaults.hydration_due_grace_minutes,
+            'eyeExerciseThresholdMinutes': app_ui_defaults.eye_exercise_threshold_minutes,
+            'statusUrl': (url_for('reminders.hydration_status') if current_user.is_authenticated else None),
+            'sleepStatusUrl': (url_for('reminders.sleep_status') if current_user.is_authenticated else None),
+            'eyeExerciseStatusUrl': (url_for('reminders.eye_exercise_status') if current_user.is_authenticated else None),
+            'eyeExerciseRespondUrl': (url_for('reminders.eye_exercise_respond') if current_user.is_authenticated else None),
+            'missedSummary': hydration_missed_summary|default(None)
+        }|tojson }},
+        timer: {{ {
+            'saveUrl': (url_for('tasks.save_pomodoro') if current_user.is_authenticated else None),
+            'stateUrl': (url_for('tasks.pomodoro_state') if current_user.is_authenticated else None),
+            'focusMinutes': app_ui_defaults.focus_minutes,
+            'breakMinutes': app_ui_defaults.break_minutes,
+            'activityLabel': app_ui_defaults.activity_label,
+            'defaultAvatarEmoji': ((current_avatar_emoji or current_user.avatar_emoji) if current_user.is_authenticated else '🙂')
+        }|tojson }}
+    };
+    window.currentAvatarEmoji = window.WELLHABIT_BOOTSTRAP.avatarEmoji || '🙂';
+    window.WELLHABIT_PROMPTS = Object.assign({}, window.WELLHABIT_BOOTSTRAP.prompts || {}, window.WELLHABIT_PROMPTS || {});
+    </script>
+    <script src="{{ url_for('static', filename='csrf.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='nav_clock.js') }}" defer></script>
+    {% if current_user.is_authenticated %}
+    <script src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='eye_exercise.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='pomodoro_timer.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='timer_widget.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='hydration.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
+    {% endif %}
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

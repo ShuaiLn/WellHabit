@@ -1,0 +1,386 @@
+{% extends 'base.html' %}
+{% block title %}Profile | WellHabit{% endblock %}
+{% block content %}
+<section class="profile-shell">
+    <div class="page-header">
+        <div class="profile-header-line">
+            <span class="profile-avatar-hero">{{ current_user.avatar_emoji or '🙂' }}</span>
+            <div>
+                <h1>{{ current_user.username }} · Profile</h1>
+                <p class="muted">Basic information, goals, and schedule live here in three smaller sections.</p>
+            </div>
+        </div>
+        <div class="tabs" id="profile-tabs">
+            <button class="tab-button is-active" type="button" data-tab="basic">Basic</button>
+            {% if profile_locked %}
+            <button class="tab-button" type="button" data-tab="goals">Goals</button>
+            <button class="tab-button" type="button" data-tab="schedule">Schedule</button>
+            <button class="tab-button" type="button" data-tab="patterns">Patterns</button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if profile_locked %}
+    <section class="tab-panel is-active" id="tab-basic">
+        <div class="profile-grid profile-grid--wellness-first">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Live</p>
+                    <h2>Wellness</h2>
+                    <div class="progress-grid">
+                        {% for metric in wellness_metrics %}
+                            <article class="wellness-row metric-{{ metric.key }}">
+                                <div class="wellness-row-head">
+                                    <div>
+                                        <strong>{{ metric.label }}</strong>
+                                        <span>{{ metric.subtitle }}</span>
+                                    </div>
+                                    <div class="wellness-score-value">{{ metric.value }}/100</div>
+                                </div>
+                                <div class="progress-track"><div class="progress-fill metric-{{ metric.key }}" style="width: {{ metric.value }}%;"></div></div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+
+                <details class="details-block" open>
+                    <summary>Mood history</summary>
+                    <div class="details-content">
+                        <div class="mood-chart-wrap">
+                            <svg class="mood-chart" id="mood-chart" viewBox="0 0 700 220" preserveAspectRatio="none" data-points='{{ mood_trend.points|tojson }}'>
+                                <g id="mood-chart-grid"></g>
+                                <path id="mood-chart-line" d="" fill="none" stroke="#6a7a5c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+                                <g id="mood-chart-points"></g>
+                            </svg>
+                        </div>
+                        <div class="mood-chart-labels">
+                            {% for point in mood_trend.points %}
+                                <span title="{{ point.short_date }} · {{ point.display }} · {{ point.value }}/100">{{ point.short_date }}</span>
+                            {% endfor %}
+                        </div>
+                        <div class="mood-recent-list">
+                            {% for entry in mood_trend.recent_entries %}
+                                <div class="mood-recent-item">
+                                    <span class="mood-dot" style="background: {{ entry.color }};"></span>
+                                    <div>
+                                        <strong>{{ entry.display }}</strong>
+                                        <p class="muted small">{{ entry.event_at.strftime('%m/%d %H:%M') }} · {{ entry.source }}</p>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <p class="muted">No mood records yet.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Basic</p>
+                    <h2>Personal data</h2>
+                    <div class="data-list">
+                        <div class="data-row"><strong>Age</strong><span>{{ current_user.age or '—' }}</span></div>
+                        <div class="data-row"><strong>Weight</strong><span>{{ current_user.weight_kg or '—' }} kg</span></div>
+                        <div class="data-row"><strong>Height</strong><span>{{ current_user.height_cm or '—' }} cm</span></div>
+                        <div class="data-row"><strong>Gender</strong><span>{{ (current_user.gender_identity or 'prefer_not_say').replace('_', ' ').title() }}</span></div>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Today</p>
+                    <h2>Quick numbers</h2>
+                    <div class="metrics-inline">
+                        {% for stat in quick_stats_cards %}
+                            <article class="metric">
+                                <strong>{{ stat.value }}</strong>
+                                <span>{{ stat.label }}</span>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-goals">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Goals</p>
+                    <h2>Targets</h2>
+                    <div class="metrics-inline">
+                        {% for goal in goal_cards %}
+                            <article class="metric">
+                                <strong>{{ goal.value }}</strong>
+                                <span>{{ goal.label }}</span>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Progress</p>
+                    <h2>Today</h2>
+                    <div class="progress-grid">
+                        {% for item in progress_cards %}
+                            <article class="wellness-row">
+                                <div class="wellness-row-head">
+                                    <strong>{{ item.label }}</strong>
+                                    <span>{{ item.value }}</span>
+                                </div>
+                                <div class="progress-track"><div class="progress-fill metric-{{ item.key }}" style="width: {{ item.percent }}%;"></div></div>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Streaks</p>
+                    <h2>Current run</h2>
+                    <div class="metrics-inline">
+                        {% for streak in streak_cards %}
+                            <article class="metric">
+                                <strong>{{ streak.value }}</strong>
+                                <span>{{ streak.label }}</span>
+                            </article>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-schedule">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Sleep</p>
+                    <h2>Daily rhythm</h2>
+                    <div class="data-list">
+                        <div class="schedule-row"><strong>Bedtime</strong><span>{{ current_user.optimal_bedtime or '22:00' }}</span></div>
+                        <div class="schedule-row"><strong>Wake time</strong><span>{{ current_user.optimal_wake_time or '07:00' }}</span></div>
+                    </div>
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Hydration</p>
+                    <h2>Anchor reminders</h2>
+                    <div class="data-list">
+                        {% for row in hydration_schedule_rows %}
+                            <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Today</p>
+                    <h2>Remaining reminder plan</h2>
+                    {% if hydration_goal_plan %}
+                        <p class="muted">{{ hydration_goal_plan.preview_text }}</p>
+                        <div class="data-list">
+                            {% for row in hydration_goal_plan.active_fixed_rows %}
+                                <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
+                            {% endfor %}
+                            {% for row in hydration_goal_plan.extra_rows %}
+                                <div class="schedule-row"><strong>{{ row.label }}</strong><span>{{ row.display_time }}</span></div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="muted">No extra water reminders are needed right now.</p>
+                    {% endif %}
+                </article>
+
+                <article class="card">
+                    <p class="eyebrow">Edit</p>
+                    <h2>Reminder times</h2>
+                    <form method="post" class="form-grid two-columns">
+                        <input type="hidden" name="action" value="update_hydration_schedule">
+                        {% for row in hydration_schedule_rows %}
+                            <label>
+                                {{ row.label }}
+                                <input type="time" name="{{ row.field_name }}" value="{{ row.time_text }}">
+                            </label>
+                        {% endfor %}
+                        <button class="btn btn-secondary full-width" type="submit">Save</button>
+                    </form>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-patterns">
+        <div class="profile-grid">
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Active</p>
+                    <h2>Behavior patterns</h2>
+                    <p class="muted">Pattern = behavioral trend, not diagnosis. It uses multiple weak signals together instead of one single signal.</p>
+                    <div class="pattern-list">
+                        {% for pattern in active_pattern_cards %}
+                            <article class="pattern-card {% if pattern.suppressed %}is-suppressed{% endif %}" data-pattern-card-open="pattern-modal-{{ pattern.id }}">
+                                <div class="pattern-card-head">
+                                    <div>
+                                        <strong>{{ pattern.display_name }}</strong>
+                                        <p>{{ pattern.headline }}</p>
+                                    </div>
+                                    <span class="pattern-score-pill">{{ pattern.score }}/{{ pattern.threshold }}</span>
+                                </div>
+                                {% if pattern.suppressed %}
+                                    <p class="muted small">Snoozed until {{ pattern.suppressed_until.isoformat() if pattern.suppressed_until else 'later' }} because you chose No thanks.</p>
+                                {% endif %}
+                                {% if pattern.evidence %}
+                                    <ul class="pattern-evidence-list">
+                                        {% for item in pattern.evidence %}<li>{{ item }}</li>{% endfor %}
+                                    </ul>
+                                {% endif %}
+                                <div class="pattern-intervention-box">
+                                    <strong>{{ pattern.intervention_title }}</strong>
+                                    <p>{{ pattern.intervention_detail }}</p>
+                                </div>
+                                <div class="pattern-action-row">
+                                    <button class="btn btn-secondary btn-sm pattern-open-btn" type="button" data-pattern-modal="pattern-modal-{{ pattern.id }}">View support</button>
+                                </div>
+                            </article>
+                        {% else %}
+                            {% if pattern_learning and not pattern_learning.ready %}
+                                <div class="pattern-empty-state">
+                                    <strong>We're still learning your rhythm.</strong>
+                                    <p class="muted">Patterns will appear after about a week of daily check-ins. Saved active days: {{ pattern_learning.active_days }}/{{ pattern_learning.min_active_days }}.</p>
+                                </div>
+                            {% else %}
+                                <p class="muted">No active behavior pattern today.</p>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+            <div class="profile-column">
+                <article class="card">
+                    <p class="eyebrow">Past</p>
+                    <h2>Archived patterns</h2>
+                    <p class="muted">A pattern auto-archives after 3 scoring days below 70% of its trigger threshold.</p>
+                    <div class="pattern-list compact">
+                        {% for pattern in past_pattern_cards %}
+                            <article class="pattern-card is-archived">
+                                <div class="pattern-card-head">
+                                    <div>
+                                        <strong>{{ pattern.display_name }}</strong>
+                                        <p>Resolved {{ pattern.resolved_on.isoformat() if pattern.resolved_on else 'earlier' }}</p>
+                                    </div>
+                                    <span class="pattern-score-pill">Past</span>
+                                </div>
+                            </article>
+                        {% else %}
+                            <p class="muted">No archived patterns yet.</p>
+                        {% endfor %}
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+    {% else %}
+    <section class="tab-panel is-active" id="tab-basic">
+        <article class="card narrow">
+            <p class="eyebrow">Step 1 of 3</p>
+            <h2>Set up Basic to unlock the rest</h2>
+            <p class="muted">Step 1 of 3 · Fill your basic information to unlock Goals and Schedule.</p>
+            <form method="post" class="form-grid two-columns">
+                <label>Age
+                    <input type="number" name="age" min="1" value="{{ current_user.age or '' }}" placeholder="17">
+                </label>
+                <label>Weight (kg)
+                    <input type="number" name="weight_kg" min="1" step="0.1" value="{{ current_user.weight_kg or '' }}" placeholder="60">
+                </label>
+                <label>Gender
+                    <select name="gender_identity">
+                        <option value="female" {% if current_user.gender_identity == 'female' %}selected{% endif %}>Female</option>
+                        <option value="male" {% if current_user.gender_identity == 'male' %}selected{% endif %}>Male</option>
+                        <option value="non_binary" {% if current_user.gender_identity == 'non_binary' %}selected{% endif %}>Non-binary</option>
+                        <option value="prefer_not_say" {% if current_user.gender_identity in [None, '', 'prefer_not_say'] %}selected{% endif %}>Prefer not to say</option>
+                    </select>
+                </label>
+                <label>Height (cm)
+                    <input type="number" name="height_cm" min="1" step="0.1" value="{{ current_user.height_cm or '' }}" placeholder="170">
+                </label>
+                <button class="btn btn-primary full-width" type="submit">Save</button>
+            </form>
+        </article>
+    </section>
+    {% endif %}
+</section>
+{% if profile_locked %}
+    {% include '_pattern_modal.html' %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+    const buttons = Array.from(document.querySelectorAll('#profile-tabs .tab-button'));
+    const panels = {
+        basic: document.getElementById('tab-basic'),
+        goals: document.getElementById('tab-goals'),
+        schedule: document.getElementById('tab-schedule'),
+        patterns: document.getElementById('tab-patterns'),
+    };
+    function activate(tab) {
+        buttons.forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
+        Object.entries(panels).forEach(([key, panel]) => panel?.classList.toggle('is-active', key === tab));
+    }
+    buttons.forEach((button) => button.addEventListener('click', () => activate(button.dataset.tab)));
+    activate('basic');
+
+    document.querySelectorAll('[data-progress-target]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const target = document.getElementById(btn.dataset.progressTarget);
+            if (!target) return;
+            const willOpen = target.hasAttribute('hidden');
+            target.toggleAttribute('hidden', !willOpen);
+            btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        });
+    });
+
+    const svg = document.getElementById('mood-chart');
+    const line = document.getElementById('mood-chart-line');
+    const pointsWrap = document.getElementById('mood-chart-points');
+    const gridWrap = document.getElementById('mood-chart-grid');
+    if (!svg || !line || !pointsWrap || !gridWrap) return;
+    let points = [];
+    try { points = JSON.parse(svg.dataset.points || '[]'); } catch (error) { points = []; }
+    if (!points.length) return;
+    const width = 700;
+    const height = 220;
+    const left = 16;
+    const right = width - 16;
+    const top = 16;
+    const bottom = height - 26;
+    const span = Math.max(1, points.length - 1);
+    [25, 50, 75, 100].forEach((level) => {
+        const y = bottom - ((level / 100) * (bottom - top));
+        const guide = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        guide.setAttribute('x1', String(left)); guide.setAttribute('x2', String(right));
+        guide.setAttribute('y1', String(y)); guide.setAttribute('y2', String(y));
+        guide.setAttribute('class', 'mood-chart-guide'); gridWrap.appendChild(guide);
+    });
+    const d = points.map((point, index) => {
+        const x = left + ((right - left) * (index / span));
+        const y = bottom - ((Number(point.value || 0) / 100) * (bottom - top));
+        point._x = x; point._y = y; return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+    line.setAttribute('d', d);
+    points.forEach((point) => {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(point._x)); circle.setAttribute('cy', String(point._y));
+        circle.setAttribute('r', '4.5'); circle.setAttribute('fill', point.color || '#6a7a5c');
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = `${point.short_date}: ${point.display} (${point.value}/100)`;
+        circle.appendChild(title); pointsWrap.appendChild(circle);
+    });
+})();
+</script>
+{% endblock %}

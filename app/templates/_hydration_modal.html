@@ -1,0 +1,28 @@
+<div class="habit-modal-overlay" id="habit-modal-overlay" hidden>
+    <div class="modal">
+        <p class="eyebrow" id="habit-modal-eyebrow">Hydration reminder</p>
+        <h2 id="habit-modal-title">Scheduled water reminder</h2>
+        <p class="muted" id="habit-modal-message">Choose a drink, add an amount, then tell WellHabit what happened.</p>
+        <div class="hydration-choice-grid">
+            <label>Beverage
+                <select id="hydration-beverage">
+                    <option value="water">Water</option>
+                    <option value="milk">Milk</option>
+                    <option value="coke">Coke</option>
+                    <option value="other">Other</option>
+                </select>
+            </label>
+            <label>Amount
+                <input type="text" id="hydration-amount" placeholder="300 ml / a glass / 2 bottles / three cups">
+            </label>
+            <label id="hydration-custom-wrap" hidden>Type
+                <input type="text" id="hydration-custom" placeholder="Write your drink name">
+            </label>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-primary" type="button" id="hydration-finished-btn">Done</button>
+            <button class="btn btn-secondary" type="button" id="hydration-not-yet-btn">Not Yet</button>
+            <button class="btn btn-danger" type="button" id="hydration-skip-btn">Skip</button>
+        </div>
+    </div>
+</div>
