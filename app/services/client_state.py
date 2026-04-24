@@ -1,2 +1,0 @@
-from __future__ import annotations
-from ._legacy_support import _peek_client_state_for_user, _store_client_state
