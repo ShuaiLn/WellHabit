@@ -54,6 +54,7 @@ class User(UserMixin, db.Model):
     eye_exercise_prompts = db.relationship('EyeExercisePrompt', backref='user', lazy=True, cascade='all, delete-orphan')
     eye_exercise_states = db.relationship('EyeExerciseState', backref='user', lazy=True, cascade='all, delete-orphan')
     care_chat_sessions = db.relationship('CareChatSession', backref='user', lazy=True, cascade='all, delete-orphan')
+    break_sessions = db.relationship('BreakSession', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -218,6 +219,16 @@ class EyeExerciseState(db.Model):
     created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
 
+
+class BreakSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    started_at = db.Column(db.DateTime, default=_utcnow, nullable=False, index=True)
+    ended_at = db.Column(db.DateTime)
+    trigger = db.Column(db.String(30), nullable=False, default='manual')
+    exercises_done = db.Column(db.Text, nullable=False, default='[]')
+    self_report = db.Column(db.String(30))
+    fatigue_signal_snapshot = db.Column(db.Text)
 
 class DailySignal(db.Model):
     __table_args__ = (db.UniqueConstraint('user_id', 'signal_date', name='ux_daily_signal_user_date'),)

@@ -1,14 +1,15 @@
+import json
 from datetime import date, datetime, timedelta
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from .. import db
 from ..ai_services import convert_drink_amount_to_ml, suggest_personal_goals
-from ..constants import HISTORY_PAGE_SIZE
+from ..constants import BREAK_EXERCISES, HISTORY_PAGE_SIZE
 from ..services.care_chat import _care_chat_history_payload, _get_or_create_active_care_chat_session
 from ..services.care_intents import CARE_BOUNDARY_LINES
-from ..models import ActivityEntry, CalendarEvent, DailyLog, Task
+from ..models import ActivityEntry, BreakSession, CalendarEvent, DailyLog, Task
 from ..services._legacy_support import _parse_clock_text, _parse_float, _parse_int
 from ..services.activity import _activity_entry_view_model, _add_calendar_event, _event_sort_key, _log_activity_entry, _recent_activity_preview
 from ..services.ai_suggestions import _maybe_create_ai_suggestion_task
@@ -63,6 +64,75 @@ from ..utils.text import _clean_text, _normalize_mood_choice
 from ..utils.timez import _aware_local_datetime, _local_duration_hours, _parse_date, _parse_time, local_now, local_today
 
 bp = Blueprint('main', __name__)
+
+
+def _break_exercise_map():
+    return {item['key']: item for item in BREAK_EXERCISES}
+
+
+def _safe_json_dumps(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    except TypeError:
+        return '{}'
+
+
+def _safe_json_loads(value, fallback=None):
+    if fallback is None:
+        fallback = []
+    try:
+        parsed = json.loads(value or '')
+    except Exception:
+        return fallback
+    return parsed if parsed is not None else fallback
+
+
+def _time_of_day_copy(now=None) -> str:
+    current = now or local_now()
+    hour = current.hour
+    if 5 <= hour < 12:
+        return 'A gentle morning reset can help you start again without forcing productivity.'
+    if 12 <= hour < 18:
+        return 'A short afternoon break can reduce screen fatigue before your next focus block.'
+    return 'A low-stimulation evening break can help your body slow down.'
+
+
+def _default_break_key(reason: str) -> str:
+    reason = (reason or 'manual').strip().lower()
+    for item in BREAK_EXERCISES:
+        if reason in set(item.get('default_for') or []):
+            return item['key']
+    return BREAK_EXERCISES[0]['key']
+
+
+def _break_duration_minutes(row: BreakSession) -> int:
+    if not row.started_at:
+        return 0
+    end = row.ended_at or local_now().replace(tzinfo=None)
+    seconds = max(0, int((end - row.started_at).total_seconds()))
+    return max(1, round(seconds / 60)) if seconds else 0
+
+
+def _break_habits_payload(user_id: int) -> dict:
+    start = local_now().replace(tzinfo=None) - timedelta(days=7)
+    rows = BreakSession.query.filter(
+        BreakSession.user_id == user_id,
+        BreakSession.started_at >= start,
+    ).order_by(BreakSession.started_at.desc()).all()
+    exercise_titles = {item['key']: item['title'] for item in BREAK_EXERCISES}
+    report_counts = {'better': 0, 'same': 0, 'still_tired': 0, 'skipped': 0}
+    exercise_counts = {}
+    for row in rows:
+        report_counts[row.self_report or 'skipped'] = report_counts.get(row.self_report or 'skipped', 0) + 1
+        for key in _safe_json_loads(row.exercises_done, []):
+            exercise_counts[key] = exercise_counts.get(key, 0) + 1
+    top_key = max(exercise_counts, key=exercise_counts.get) if exercise_counts else None
+    return {
+        'weekly_count': len(rows),
+        'report_counts': report_counts,
+        'top_exercise': exercise_titles.get(top_key, '—') if top_key else '—',
+        'recent': rows[:4],
+    }
 
 
 
@@ -156,6 +226,80 @@ def dashboard():
     )
 
 
+
+@bp.route('/break')
+@login_required
+def break_view():
+    reason = (request.args.get('reason') or 'manual').strip().lower() or 'manual'
+    if reason not in {'manual', 'fatigue'}:
+        reason = 'manual'
+    default_exercise_key = _default_break_key(reason)
+    suggested_duration_sec = 300 if reason == 'fatigue' else 180
+    return render_template(
+        'break.html',
+        reason=reason,
+        exercises=BREAK_EXERCISES,
+        default_exercise_key=default_exercise_key,
+        suggested_duration_sec=suggested_duration_sec,
+        time_of_day_copy=_time_of_day_copy(),
+    )
+
+
+@bp.route('/break/start', methods=['POST'])
+@login_required
+def break_start():
+    data = request.get_json(silent=True) or {}
+    trigger = (data.get('trigger') or 'manual').strip().lower()
+    if trigger not in {'manual', 'fatigue'}:
+        trigger = 'manual'
+    row = BreakSession(
+        user_id=current_user.id,
+        started_at=local_now().replace(tzinfo=None),
+        trigger=trigger,
+        fatigue_signal_snapshot=_safe_json_dumps(data.get('fatigue_signal_snapshot') or {}),
+    )
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'session_id': row.id, 'started_at': row.started_at.isoformat()})
+
+
+@bp.route('/break/finish', methods=['POST'])
+@login_required
+def break_finish():
+    data = request.get_json(silent=True) or {}
+    session_id = _parse_int(data.get('session_id'), default=None, minimum=1, maximum=10_000_000)
+    row = BreakSession.query.filter_by(id=session_id, user_id=current_user.id).first() if session_id else None
+    if not row:
+        return jsonify({'ok': False, 'message': 'Break session not found.'}), 404
+    exercises_done = data.get('exercises_done') or []
+    if not isinstance(exercises_done, list):
+        exercises_done = []
+    allowed_keys = set(_break_exercise_map())
+    exercises_done = [str(key) for key in exercises_done if str(key) in allowed_keys]
+    self_report = (data.get('self_report') or '').strip().lower()
+    raw_self_report = self_report
+    if self_report not in {'better', 'same', 'still_tired'}:
+        current_app.logger.warning("Invalid break self_report for user %s session %s: %r", current_user.id, session_id, raw_self_report)
+        self_report = 'same'
+    now = local_now().replace(tzinfo=None)
+    row.ended_at = now
+    row.exercises_done = _safe_json_dumps(exercises_done)
+    row.self_report = self_report
+    cooldown_minutes = 20 if self_report == 'better' else 8
+    cooldown_until = now + timedelta(minutes=cooldown_minutes)
+    exercise_titles = [item['title'] for item in BREAK_EXERCISES if item['key'] in exercises_done]
+    duration = _break_duration_minutes(row)
+    _log_activity_entry(
+        current_user.id,
+        'break',
+        'Break completed',
+        f"{duration} min · Feeling: {self_report.replace('_', ' ')} · {', '.join(exercise_titles) if exercise_titles else 'No exercise selected'}",
+        event_at=now,
+    )
+    db.session.commit()
+    return jsonify({'ok': True, 'cooldown_until': cooldown_until.isoformat(), 'cooldown_minutes': cooldown_minutes})
+
+
 @bp.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
@@ -243,6 +387,7 @@ def profile():
         active_pattern_cards=get_active_pattern_cards(current_user.id, include_suppressed=True) if locked else [],
         past_pattern_cards=get_past_pattern_cards(current_user.id) if locked else [],
         pattern_learning=get_pattern_learning_state(current_user.id) if locked else {'ready': False, 'active_days': 0, 'logged_days': 0, 'min_active_days': 7},
+        break_habits=_break_habits_payload(current_user.id) if locked else None,
     )
 
 
@@ -540,6 +685,12 @@ def calendar_view():
         DailyLog.log_date >= month_start,
         DailyLog.log_date < next_month_boundary,
     ).all()
+    month_breaks = BreakSession.query.filter(
+        BreakSession.user_id == current_user.id,
+        BreakSession.started_at >= datetime.combine(month_start, datetime.min.time()),
+        BreakSession.started_at < datetime.combine(next_month_boundary, datetime.min.time()),
+    ).all()
+    break_dates = {row.started_at.date() for row in month_breaks if row.started_at}
 
     selected_tasks = Task.query.filter_by(user_id=current_user.id, task_date=selected_date, completed=True).order_by(Task.sort_order.asc(), Task.created_at.asc()).all()
     selected_events = sorted(
@@ -550,6 +701,9 @@ def calendar_view():
     selected_log = DailyLog.query.filter_by(user_id=current_user.id, log_date=selected_date).first()
 
     weeks = _month_grid(year, month, month_tasks, month_events, month_logs, current_user, selected_date=selected_date)
+    for week in weeks:
+        for day in week:
+            day['has_break'] = day['date'] in break_dates
     prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
     next_year, next_month_num = (year + 1, 1) if month == 12 else (year, month + 1)
 

@@ -457,6 +457,28 @@ def run_lightweight_migrations(app: Flask) -> None:
         if 'care_chat_message' in tables or 'care_chat_message' not in tables:
             _ensure_index(cursor, 'CREATE INDEX IF NOT EXISTS ix_care_chat_message_session_created ON care_chat_message (session_id, created_at)')
 
+
+        if 'break_session' not in tables:
+            cursor.execute(
+                '''
+                CREATE TABLE break_session (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    started_at DATETIME NOT NULL,
+                    ended_at DATETIME,
+                    trigger VARCHAR(30) NOT NULL DEFAULT 'manual',
+                    exercises_done TEXT NOT NULL DEFAULT '[]',
+                    self_report VARCHAR(30),
+                    fatigue_signal_snapshot TEXT,
+                    FOREIGN KEY(user_id) REFERENCES user (id)
+                )
+                '''
+            )
+            cursor.execute('CREATE INDEX IF NOT EXISTS ix_break_session_user_started_at ON break_session (user_id, started_at)')
+
+        if 'break_session' in tables:
+            _ensure_index(cursor, 'CREATE INDEX IF NOT EXISTS ix_break_session_user_started_at ON break_session (user_id, started_at)')
+
         conn.commit()
 
 

@@ -94,3 +94,11 @@ bash scripts/package.sh
 ```
 
 This removes Python cache files before packaging and excludes `instance/`, `.env`, local databases, logs, virtual environments, and IDE folders from the archive.
+
+
+## Guided break mode
+
+- Guided breathing and posture breaks with optional camera-based feedback.
+- Pose detection is intended as weak habit support, not medical advice or diagnosis.
+- To enable local pose feedback, place `pose_landmarker_lite.task` in `app/static/break_assets/`. The page degrades to visual-only breathing guidance when the model or camera is unavailable.
+- Uses MediaPipe Tasks Vision in the browser for optional pose landmarks. Video frames are not uploaded by the break page.

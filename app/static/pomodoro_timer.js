@@ -410,6 +410,30 @@
             state.lastMessage = 'When a focus round ends, it will be saved automatically.';
             return writeState(state);
         },
+        async stopAndSave(reason) {
+            closePomodoroNotification();
+            stopKeepAlive();
+            stopTitleFlash();
+            const state = readState();
+            const remaining = getRemainingSeconds(state);
+            const total = (state.mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
+            const elapsedSeconds = Math.max(0, total - remaining);
+            if (state.mode === 'focus' && state.sessionKey && elapsedSeconds >= 60) {
+                const partial = Object.assign({}, state, {
+                    focusMinutes: Math.max(1, Math.round(elapsedSeconds / 60)),
+                    activityLabel: `${state.activityLabel || 'work'} · ${reason || 'stopped early'}`,
+                });
+                await saveFocusSession(partial);
+            }
+            state.mode = 'focus';
+            state.cycleNumber = 1;
+            state.remainingSeconds = state.focusMinutes * 60;
+            state.isRunning = false;
+            state.endAtMs = null;
+            state.sessionKey = null;
+            state.lastMessage = reason === 'fatigue_break' ? 'Focus saved before guided break.' : 'Timer stopped and saved.';
+            return writeState(state);
+        },
         skipToBreak(message) {
             closePomodoroNotification();
             stopTitleFlash();
@@ -432,6 +456,8 @@
         formatSeconds,
         getRemainingSeconds,
     };
+
+    window.pomodoroTimer = window.WellHabitTimer;
 
     window.addEventListener('beforeunload', () => {
         try { queueServerSync(readState()); } catch (error) {}

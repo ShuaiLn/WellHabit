@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% block title %}Guided Break | WellHabit{% endblock %}
+{% block content %}
+<section class="break-shell" id="break-app" data-reason="{{ reason }}" data-default-exercise="{{ default_exercise_key }}" data-suggested-duration="{{ suggested_duration_sec }}" data-start-url="{{ url_for('main.break_start') }}" data-finish-url="{{ url_for('main.break_finish') }}">
+    <header class="break-topbar card card--compact">
+        <div>
+            <p class="eyebrow">Guided break · {{ reason|title }}</p>
+            <h1>Reset before your next focus block</h1>
+            <p class="muted">{{ time_of_day_copy }} Camera feedback is optional and is not medical advice.</p>
+        </div>
+        <div class="break-timer-wrap">
+            <span class="soft-badge" id="break-state-pill">Loading</span>
+            <strong class="break-total-timer" id="break-total-timer" role="timer" aria-live="off">{{ '%02d:%02d'|format((suggested_duration_sec // 60), (suggested_duration_sec % 60)) }}</strong>
+            <div class="modal-actions">
+                <button class="btn btn-secondary btn-sm" type="button" id="break-see-all-btn">See all</button>
+                <button class="btn btn-primary btn-sm" type="button" id="break-end-btn">End break</button>
+            </div>
+        </div>
+    </header>
+
+    <section class="break-picker card" id="full-picker" hidden>
+        <div class="section-title-row">
+            <div>
+                <p class="eyebrow">Choose one</p>
+                <h2>What kind of break do you want?</h2>
+            </div>
+            <span class="muted small">Enter or click to start</span>
+        </div>
+        <div class="break-picker-grid">
+            {% for exercise in exercises %}
+            <button class="exercise-card picker-card {% if exercise.key == 'quiet_timer' %}picker-card--wide{% endif %}" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}">
+                <img src="{{ url_for('static', filename='break_assets/' ~ exercise.asset) }}" alt="" aria-hidden="true">
+                <span class="soft-badge">{{ exercise.type }} · {{ exercise.duration_sec }}s</span>
+                <strong>{{ exercise.title }}</strong>
+                <span>{{ exercise.short_desc }}</span>
+            </button>
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="break-layout" id="break-workspace">
+        <aside class="card card--compact break-sidebar">
+            <div class="section-title-row">
+                <div>
+                    <p class="eyebrow">Exercises</p>
+                    <h2>Break menu</h2>
+                </div>
+                <button class="link-btn" type="button" id="break-see-all-side-btn">See all</button>
+            </div>
+            <div class="break-exercise-list" role="listbox" aria-label="Break exercises">
+                {% for exercise in exercises %}
+                <button class="exercise-card list-row" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}" data-active="{{ 'true' if exercise.key == default_exercise_key else 'false' }}" tabindex="0">
+                    <img src="{{ url_for('static', filename='break_assets/' ~ exercise.asset) }}" alt="" aria-hidden="true">
+                    <span>
+                        <strong>{{ exercise.title }}</strong>
+                        <small>{{ exercise.short_desc }}</small>
+                    </span>
+                    <span class="soft-badge">{{ exercise.duration_sec }}s</span>
+                </button>
+                {% endfor %}
+            </div>
+        </aside>
+
+        <main class="card break-main-card">
+            <div class="break-stage" id="break-stage">
+                <video id="break-video" autoplay muted playsinline hidden aria-hidden="true"></video>
+                <canvas id="break-canvas" hidden aria-hidden="true"></canvas>
+                <div class="breathing-orb" id="breathing-orb" hidden aria-hidden="true"><span></span></div>
+                <div class="alignment-score-badge" id="alignment-score-badge" hidden>Score --</div>
+                <div class="break-camera-placeholder" id="break-placeholder">
+                    <strong>Getting ready</strong>
+                    <span id="break-placeholder-text">Loading guide...</span>
+                </div>
+                <div class="guide-overlay" id="guide-overlay" aria-live="polite">Loading break guide...</div>
+            </div>
+            <div class="break-stage-footer">
+                <div>
+                    <p class="eyebrow" id="current-exercise-type">Exercise</p>
+                    <h2 id="current-exercise-title">Guided exercise</h2>
+                    <p class="muted" id="current-exercise-desc">Choose an exercise to begin.</p>
+                </div>
+                <button class="btn btn-primary" type="button" id="exercise-start-btn">Start exercise</button>
+            </div>
+        </main>
+
+        <aside class="card card--compact break-right-panel">
+            <p class="eyebrow">Progress</p>
+            <h2>Session</h2>
+            <div class="progress-track"><div class="progress-fill" id="break-progress-fill" style="width:0%;"></div></div>
+            <div class="fatigue-metric-grid">
+                <span id="break-camera-status">Camera: checking</span>
+                <span id="break-model-status">Pose model: loading</span>
+                <span id="break-current-phase">Phase: —</span>
+                <span id="break-completed-count">Done: 0</span>
+            </div>
+            <div class="card card--muted card--compact">
+                <p class="eyebrow">Privacy</p>
+                <p class="muted small">Camera is optional. Pose feedback runs in the browser when available. Video is not uploaded or stored by this page.</p>
+            </div>
+            <button class="btn btn-secondary full-width" type="button" id="break-skip-camera-btn">Skip detection</button>
+        </aside>
+    </div>
+
+    <div class="pose-consent-toast card card--compact" id="pose-consent-toast" hidden role="dialog" aria-modal="true" aria-labelledby="pose-consent-title">
+        <div>
+            <p class="eyebrow">Optional camera feedback</p>
+            <h2 id="pose-consent-title">Use pose detection for this break?</h2>
+            <p class="muted small">Pose detection uses your camera to give posture feedback. It runs in your browser when available; video is not uploaded or stored by this page.</p>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-primary btn-sm" type="button" id="pose-consent-ok">OK</button>
+            <button class="btn btn-secondary btn-sm" type="button" id="pose-consent-skip">Skip detection</button>
+        </div>
+    </div>
+
+    <div class="habit-modal-overlay" id="self-report-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="self-report-title">
+            <p class="eyebrow">Break complete</p>
+            <h2 id="self-report-title">How do you feel now?</h2>
+            <p class="muted">This helps WellHabit decide whether to pause fatigue reminders for a while.</p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" type="button" data-self-report="better">Better</button>
+                <button class="btn btn-secondary" type="button" data-self-report="same">Same</button>
+                <button class="btn btn-ghost" type="button" data-self-report="still_tired">Still tired</button>
+            </div>
+        </div>
+    </div>
+</section>
+<script nonce="{{ csp_nonce }}">
+window.WELLHABIT_BREAK = {
+    exercises: {{ exercises|tojson }},
+    reason: {{ reason|tojson }},
+    defaultExerciseKey: {{ default_exercise_key|tojson }},
+    suggestedDurationSec: {{ suggested_duration_sec|tojson }},
+    startUrl: {{ url_for('main.break_start')|tojson }},
+    finishUrl: {{ url_for('main.break_finish')|tojson }},
+    dashboardUrl: {{ url_for('main.dashboard')|tojson }}
+};
+</script>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="{{ url_for('static', filename='vision_loader.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='pose_monitor.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='break_session.js') }}"></script>
+{% endblock %}

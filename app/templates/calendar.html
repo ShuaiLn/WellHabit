@@ -28,7 +28,7 @@
                     <a class="calendar-cell {% if not day.in_month %}muted-cell{% endif %} {% if day.is_today %}today-cell{% endif %} {% if day.is_selected %}selected-cell{% endif %}" href="{{ url_for('main.calendar_view', year=day.date.year, month=day.date.month, selected_date=day.date.isoformat()) }}">
                         <div class="cell-date-row">
                             <div class="cell-date">{{ day.date.day }}</div>
-                            {% if day.is_selected %}<span class="muted small">Open</span>{% endif %}
+                            {% if day.has_break %}<span class="calendar-break-dot" title="Break completed"></span>{% endif %}{% if day.is_selected %}<span class="muted small">Open</span>{% endif %}
                         </div>
                         <div class="cell-tasks">
                             {% for preview in day.event_previews %}<div class="mini-task">{{ preview }}</div>{% endfor %}

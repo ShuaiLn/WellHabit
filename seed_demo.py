@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from app import create_app, db
-from app.models import ActivityEntry, CalendarEvent, DailyLog, PomodoroSession, Task, User
+from app.models import ActivityEntry, BreakSession, CalendarEvent, DailyLog, PomodoroSession, Task, User
 
 DEMO_USERS = [
     {
@@ -110,6 +110,24 @@ def _seed_user(user: User, user_index: int) -> None:
 
     if not ActivityEntry.query.filter_by(user_id=user.id).count():
         db.session.add(ActivityEntry(user_id=user.id, entry_type='seed', title='Demo data created', description='Created by seed_demo.py'))
+
+
+    if not BreakSession.query.filter_by(user_id=user.id).count():
+        for offset, report, trigger, exercises in [
+            (1, 'better', 'fatigue', '["box_breathing","seated_cat_cow"]'),
+            (3, 'same', 'manual', '["quiet_timer"]'),
+            (5, 'better', 'manual', '["neck_rolls","shoulder_opener"]'),
+        ]:
+            started = datetime.combine(today - timedelta(days=offset), datetime.min.time()).replace(hour=15 + user_index, minute=10)
+            db.session.add(BreakSession(
+                user_id=user.id,
+                started_at=started,
+                ended_at=started + timedelta(minutes=4),
+                trigger=trigger,
+                exercises_done=exercises,
+                self_report=report,
+                fatigue_signal_snapshot='{}',
+            ))
 
 
 def main() -> None:

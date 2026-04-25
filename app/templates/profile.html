@@ -99,6 +99,25 @@
                         {% endfor %}
                     </div>
                 </article>
+
+                <article class="card">
+                    <p class="eyebrow">Break habits</p>
+                    <h2>Guided rest</h2>
+                    <div class="break-habits-grid">
+                        <article class="metric"><strong>{{ break_habits.weekly_count if break_habits else 0 }}</strong><span>This week</span></article>
+                        <article class="metric"><strong>{{ break_habits.top_exercise if break_habits else '—' }}</strong><span>Most used</span></article>
+                        <article class="metric"><strong>{{ break_habits.report_counts.better if break_habits else 0 }}</strong><span>Felt better</span></article>
+                    </div>
+                    {% if break_habits and break_habits.recent %}
+                    <div class="data-list">
+                        {% for row in break_habits.recent %}
+                            <div class="data-row"><strong>{{ row.started_at.strftime('%m/%d %H:%M') }}</strong><span>{{ row.trigger }} · {{ row.self_report or 'not rated' }}</span></div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                        <p class="muted">No guided break records yet.</p>
+                    {% endif %}
+                </article>
             </div>
         </div>
     </section>

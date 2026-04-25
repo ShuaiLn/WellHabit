@@ -172,13 +172,16 @@
         bindEvents() {
             this.startBtn?.addEventListener('click', () => this.startFromUserGesture());
             this.stopBtn?.addEventListener('click', () => this.stop('Camera preview is off.'));
-            this.restBtn?.addEventListener('click', () => {
+            this.restBtn?.addEventListener('click', async () => {
                 this.hideBreakModal();
-                this.reportEvent('break_confirmed', Object.assign({}, this.lastPayload || {}, { user_confirmed_break: true }), true);
-                if (window.WellHabitTimer?.skipToBreak) {
-                    window.WellHabitTimer.skipToBreak('Break started early because of a possible fatigue signal.');
+                const snapshot = Object.assign({}, this.lastPayload || {}, { user_confirmed_break: true });
+                this.reportEvent('break_confirmed', snapshot, true);
+                try { sessionStorage.setItem('fatigueSignalSnapshot', JSON.stringify(snapshot)); } catch (error) {}
+                if (window.WellHabitTimer?.stopAndSave) {
+                    try { await window.WellHabitTimer.stopAndSave('fatigue_break'); } catch (error) {}
                 }
-                this.stop('Break started. Camera released.');
+                this.pauseForHandoff();
+                window.location.href = '/break?reason=fatigue';
             });
             this.keepBtn?.addEventListener('click', () => {
                 this.hideBreakModal();
@@ -317,6 +320,16 @@
 
             this.setStatus('Calibrating your normal eye/head baseline. Keep working normally for a few seconds.');
             this.loop();
+        }
+
+
+        pauseForHandoff() {
+            if (this.rafId) window.cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+            this.pausedForVisibility = true;
+            try { sessionStorage.setItem('cameraHandoff', '1'); } catch (error) {}
+            window.WellHabitCameraHandoffStream = this.stream || null;
+            this.setStatus('Camera handoff prepared for guided break.');
         }
 
         stop(message) {
@@ -610,7 +623,16 @@
             }
         }
 
+        isInBreakCooldown() {
+            const until = Number(window.WellHabitFatigueCooldownUntil || 0);
+            return Number.isFinite(until) && Date.now() < until;
+        }
+
         maybeAlert(now, score, microSleep, payload) {
+            if (this.isInBreakCooldown()) {
+                this.heavySince = null;
+                return;
+            }
             const band = microSleep ? 'microsleep' : (score >= 0.7 ? 'heavy' : (score >= 0.5 ? 'mild' : 'normal'));
             if (microSleep) {
                 this.reportEvent('microsleep', payload, true);

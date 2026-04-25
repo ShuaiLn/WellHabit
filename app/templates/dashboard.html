@@ -2,6 +2,7 @@
 {% block title %}Home | WellHabit{% endblock %}
 {% block content %}
 <section class="dashboard-shell">
+    <div class="flash info" id="fatigue-cooldown-banner" hidden></div>
     <p class="dashboard-status-line">{{ nav_local_date.split(',')[0] if ',' in nav_local_date else nav_local_date }} · {{ today_focus_count }} focus rounds, {{ today_log.water_ml if today_log else 0 }} ml water</p>
 
     <div class="dashboard-main-column">
@@ -521,6 +522,26 @@ if (todoListEl) {
     });
 }
 </script>
+
+<script nonce="{{ csp_nonce }}">
+(function () {
+    const banner = document.getElementById('fatigue-cooldown-banner');
+    if (!banner) return;
+    let until = '';
+    try { until = sessionStorage.getItem('fatigueCooldownUntil') || ''; } catch (error) {}
+    if (!until) return;
+    const ts = Date.parse(until);
+    if (!Number.isFinite(ts) || Date.now() >= ts) {
+        try { sessionStorage.removeItem('fatigueCooldownUntil'); } catch (error) {}
+        return;
+    }
+    const label = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    banner.textContent = `Welcome back. Fatigue check paused until ${label}.`;
+    banner.hidden = false;
+    window.WellHabitFatigueCooldownUntil = ts;
+})();
+</script>
 <script src="{{ url_for('static', filename='fatigue_monitor.js') }}" defer></script>
 <script src="{{ url_for('static', filename='care_chat.js') }}" defer></script>
 {% endblock %}
+

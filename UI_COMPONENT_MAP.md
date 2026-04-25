@@ -26,3 +26,11 @@ This release treats the minimal UI as one full-app cutover rather than a page-by
 - Motion
 
 All tokens live in `app/static/style.css`. The active release is exposed through `app_ui_defaults.ui_release` so the app shell can switch as one system instead of mixing old and new surfaces.
+
+
+## Guided break components
+
+- `.exercise-card` — reuses card/list-row spacing and button rhythm for selectable break actions.
+- `.breathing-orb` — centered animated visual guide inside `.break-stage`.
+- `.guide-overlay` — bottom instruction panel using the existing card surface and muted text language.
+- `.alignment-score-badge` — small floating badge for optional posture alignment feedback.
