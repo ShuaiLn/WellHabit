@@ -44,17 +44,17 @@ class User(UserMixin, db.Model):
     last_task_rollover_on = db.Column(db.Date)
     last_activity_pruned_at = db.Column(db.DateTime)
 
-    daily_logs = db.relationship('DailyLog', backref='user', lazy=True, cascade='all, delete-orphan')
-    tasks = db.relationship('Task', backref='user', lazy=True, cascade='all, delete-orphan')
-    calendar_events = db.relationship('CalendarEvent', backref='user', lazy=True, cascade='all, delete-orphan')
-    pomodoro_sessions = db.relationship('PomodoroSession', backref='user', lazy=True, cascade='all, delete-orphan')
-    hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy=True, cascade='all, delete-orphan')
-    activity_entries = db.relationship('ActivityEntry', backref='user', lazy=True, cascade='all, delete-orphan')
-    mood_entries = db.relationship('MoodEntry', backref='user', lazy=True, cascade='all, delete-orphan')
-    eye_exercise_prompts = db.relationship('EyeExercisePrompt', backref='user', lazy=True, cascade='all, delete-orphan')
-    eye_exercise_states = db.relationship('EyeExerciseState', backref='user', lazy=True, cascade='all, delete-orphan')
-    care_chat_sessions = db.relationship('CareChatSession', backref='user', lazy=True, cascade='all, delete-orphan')
-    break_sessions = db.relationship('BreakSession', backref='user', lazy=True, cascade='all, delete-orphan')
+    daily_logs = db.relationship('DailyLog', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    tasks = db.relationship('Task', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    calendar_events = db.relationship('CalendarEvent', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    pomodoro_sessions = db.relationship('PomodoroSession', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    hydration_prompts = db.relationship('HydrationPrompt', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    activity_entries = db.relationship('ActivityEntry', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    mood_entries = db.relationship('MoodEntry', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    eye_exercise_prompts = db.relationship('EyeExercisePrompt', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    eye_exercise_states = db.relationship('EyeExerciseState', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    care_chat_sessions = db.relationship('CareChatSession', backref='user', lazy='selectin', cascade='all, delete-orphan')
+    break_sessions = db.relationship('BreakSession', backref='user', lazy='selectin', cascade='all, delete-orphan')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -89,7 +89,7 @@ class DailyLog(db.Model):
     last_meal_detected_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
 
-    hydration_prompts = db.relationship('HydrationPrompt', backref='daily_log', lazy=True)
+    hydration_prompts = db.relationship('HydrationPrompt', backref='daily_log', lazy='selectin')
 
 
 class Task(db.Model):
@@ -185,7 +185,7 @@ class CareChatSession(db.Model):
     last_activity_at = db.Column(db.DateTime, default=_utcnow, nullable=False)
     message_count = db.Column(db.Integer, nullable=False, default=0)
 
-    messages = db.relationship('CareChatMessage', backref='care_chat_session', lazy=True, cascade='all, delete-orphan')
+    messages = db.relationship('CareChatMessage', backref='care_chat_session', lazy='selectin', cascade='all, delete-orphan')
 
 
 class CareChatMessage(db.Model):

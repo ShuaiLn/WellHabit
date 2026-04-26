@@ -855,3 +855,75 @@ body[data-ui-release="minimal_full_cutover"] {
         max-width: none;
     }
 }
+
+
+.nav-logout-form {
+    display: inline;
+    margin: 0;
+}
+
+.nav-link-button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+}
+
+.nav-link-button:hover,
+.nav-link-button:focus-visible {
+    text-decoration: underline;
+}
+
+.eye-page-shell {
+    display: grid;
+    gap: var(--space-20);
+}
+
+.eye-page-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 0.8fr);
+    gap: var(--space-20);
+    align-items: start;
+}
+
+.eye-page-video-card {
+    display: grid;
+    gap: var(--space-16);
+}
+
+.eye-page-video-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background: var(--surface-muted);
+}
+
+.eye-page-video-wrap iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.eye-page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-12);
+    align-items: center;
+}
+
+.eye-page-guide {
+    display: grid;
+    gap: var(--space-12);
+}
+
+@media (max-width: 760px) {
+    .eye-page-layout {
+        grid-template-columns: 1fr;
+    }
+}

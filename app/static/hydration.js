@@ -119,17 +119,27 @@
         const banner = document.createElement('div');
         banner.className = 'hydration-missed-banner';
         banner.hidden = true;
-        banner.innerHTML = `
-            <div>
-                <strong class="hydration-missed-title">Missed water reminder</strong>
-                <p class="hydration-missed-text" id="hydration-missed-text"></p>
-            </div>
-            <div class="hydration-missed-actions">
-                <button type="button" class="btn btn-secondary btn-sm" id="hydration-missed-ok-btn">Okay</button>
-            </div>
-        `;
+        const textWrap = document.createElement('div');
+        const title = document.createElement('strong');
+        title.className = 'hydration-missed-title';
+        title.textContent = 'Missed water reminder';
+        const text = document.createElement('p');
+        text.className = 'hydration-missed-text';
+        text.id = 'hydration-missed-text';
+        textWrap.append(title, text);
+
+        const actions = document.createElement('div');
+        actions.className = 'hydration-missed-actions';
+        const okButton = document.createElement('button');
+        okButton.type = 'button';
+        okButton.className = 'btn btn-secondary btn-sm';
+        okButton.id = 'hydration-missed-ok-btn';
+        okButton.textContent = 'Okay';
+        actions.appendChild(okButton);
+
+        banner.append(textWrap, actions);
         document.body.appendChild(banner);
-        banner.querySelector('#hydration-missed-ok-btn')?.addEventListener('click', () => {
+        okButton.addEventListener('click', () => {
             const summary = banner._summary || null;
             if (summary) {
                 markMissedSummarySeen(summary);

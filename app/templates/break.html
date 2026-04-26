@@ -139,7 +139,7 @@ window.WELLHABIT_BREAK = {
 </script>
 {% endblock %}
 {% block scripts %}
-<script type="module" src="{{ url_for('static', filename='vision_loader.js') }}"></script>
-<script type="module" src="{{ url_for('static', filename='pose_monitor.js') }}"></script>
-<script type="module" src="{{ url_for('static', filename='break_session.js') }}"></script>
+<script nonce="{{ csp_nonce }}" type="module" src="{{ url_for('static', filename='vision_loader.js') }}"></script>
+<script nonce="{{ csp_nonce }}" type="module" src="{{ url_for('static', filename='pose_monitor.js') }}"></script>
+<script nonce="{{ csp_nonce }}" type="module" src="{{ url_for('static', filename='break_session.js') }}"></script>
 {% endblock %}

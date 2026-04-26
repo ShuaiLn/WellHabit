@@ -10,6 +10,7 @@ from ._legacy_support import (
     _serialize_prompt,
     _sleep_reminder_payload,
     _hydration_prompt_label,
+    _increment_water_if_within_limit,
     _water_limit_error,
     _default_hydration_schedule_map,
     _ensure_hydration_schedule_defaults,

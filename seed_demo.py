@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 
 from app import create_app, db
 from app.models import ActivityEntry, BreakSession, CalendarEvent, DailyLog, PomodoroSession, Task, User
+from app.utils.timez import local_today
 
 DEMO_USERS = [
     {
@@ -80,7 +81,7 @@ DEMO_USERS = [
 
 
 def _seed_user(user: User, user_index: int) -> None:
-    today = date.today()
+    today = local_today()
     if DailyLog.query.filter_by(user_id=user.id, log_date=today).first() is None:
         db.session.add(DailyLog(
             user_id=user.id,
@@ -90,7 +91,7 @@ def _seed_user(user: User, user_index: int) -> None:
             steps=4200 + (user_index * 600),
             exercise_minutes=15 + (user_index * 5),
             journal_text='Seeded demo entry for first-run UI checks.',
-            mood_label='okay',
+            mood_label='normal',
             activity_text='Seed demo walkthrough',
         ))
 

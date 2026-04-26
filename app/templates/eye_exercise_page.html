@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}Eye Exercise | WellHabit{% endblock %}
+{% block content %}
+<script nonce="{{ csp_nonce }}">
+window.WELLHABIT_DISABLE_EYE_EXERCISE_OVERLAY = true;
+</script>
+<section class="eye-page-shell">
+    <header class="page-header card card--compact">
+        <div>
+            <p class="eyebrow">Eye exercise</p>
+            <h1>Rest your eyes before going back to focus</h1>
+            {% if active_eye_prompt %}
+                <p class="muted">{{ active_eye_prompt.message }}</p>
+            {% else %}
+                <p class="muted">Use this page any time your eyes feel tired. A short eye reset is recommended after about {{ eye_exercise_threshold }} minutes of focus.</p>
+            {% endif %}
+        </div>
+        <a class="btn btn-secondary btn-sm" href="{{ url_for('main.dashboard') }}">Back Home</a>
+    </header>
+
+    <section class="eye-page-layout">
+        <div class="card eye-page-video-card">
+            <div class="eye-page-video-wrap">
+                <iframe src="{{ eye_exercise_embed_url }}" title="Eye exercise video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+            </div>
+            <div class="eye-page-actions">
+                <form method="post" action="{{ url_for('main.eye_exercise_finish_page') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-primary" type="submit">Mark Eye Exercise Done</button>
+                </form>
+                <a class="btn btn-secondary" href="{{ url_for('main.break_view') }}">Go to Yoga</a>
+            </div>
+        </div>
+
+        <aside class="card card--compact eye-page-guide">
+            <p class="eyebrow">Simple guide</p>
+            <h2>20-20-20 reset</h2>
+            <ul class="soft-list">
+                <li>Look about 20 feet away.</li>
+                <li>Relax your shoulders and blink slowly.</li>
+                <li>Keep your eyes off the screen for about 20 seconds.</li>
+            </ul>
+            <div class="card card--muted card--compact">
+                <p class="eyebrow">Note</p>
+                <p class="muted small">This is a wellness reminder, not medical advice. If eye pain or vision problems continue, ask a qualified professional.</p>
+            </div>
+        </aside>
+    </section>
+</section>
+{% endblock %}

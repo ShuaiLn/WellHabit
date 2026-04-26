@@ -21,13 +21,28 @@ login_manager.login_view = 'auth.login'
 login_manager.login_message_category = 'warning'
 
 
-def _resolve_secret_key() -> tuple[str, bool]:
+def _resolve_secret_key(instance_path: Path | None = None) -> tuple[str, bool]:
     configured = (os.getenv('SECRET_KEY') or os.getenv('FLASK_SECRET_KEY') or '').strip()
     if configured:
         return configured, False
 
-    return 'dev-only-insecure-key', True
+    key_dir = instance_path or (Path(__file__).resolve().parent.parent / 'instance')
+    key_path = key_dir / 'secret_key.txt'
 
+    if key_path.exists():
+        stored = key_path.read_text(encoding='utf-8').strip()
+        if stored:
+            return stored, False
+
+    generated = secrets.token_urlsafe(32)
+    key_dir.mkdir(parents=True, exist_ok=True)
+    key_path.write_text(f'{generated}\n', encoding='utf-8')
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        # Best effort on platforms/filesystems that do not support POSIX permissions.
+        pass
+    return generated, False
 
 def _get_sqlite_db_path(app: Flask) -> Path:
     uri = app.config['SQLALCHEMY_DATABASE_URI']
@@ -104,9 +119,9 @@ def _dedupe_daily_logs(cursor: sqlite3.Cursor) -> None:
         keep_id = rows[0]['id']
         duplicate_ids = [row['id'] for row in rows[1:]]
         total_water_ml = sum(int(row['water_ml'] or 0) for row in rows)
-        total_sleep_hours = sum(float(row['sleep_hours'] or 0) for row in rows)
-        total_steps = sum(int(row['steps'] or 0) for row in rows)
-        total_exercise_minutes = sum(int(row['exercise_minutes'] or 0) for row in rows)
+        total_sleep_hours = max(float(row['sleep_hours'] or 0) for row in rows)
+        total_steps = max(int(row['steps'] or 0) for row in rows)
+        total_exercise_minutes = max(int(row['exercise_minutes'] or 0) for row in rows)
         notes = _first_non_empty(rows, 'notes')
         journal_text = _first_non_empty(rows, 'journal_text')
         mood_label = _first_non_empty(rows, 'mood_label')
@@ -438,7 +453,8 @@ def run_lightweight_migrations(app: Flask) -> None:
                 )
                 '''
             )
-        if 'care_chat_session' in tables or 'care_chat_session' not in tables:
+            tables.add('care_chat_session')
+        if 'care_chat_session' in tables:
             _ensure_index(cursor, 'CREATE INDEX IF NOT EXISTS ix_care_chat_session_user_ended_at ON care_chat_session (user_id, ended_at)')
 
         if 'care_chat_message' not in tables:
@@ -454,7 +470,8 @@ def run_lightweight_migrations(app: Flask) -> None:
                 )
                 '''
             )
-        if 'care_chat_message' in tables or 'care_chat_message' not in tables:
+            tables.add('care_chat_message')
+        if 'care_chat_message' in tables:
             _ensure_index(cursor, 'CREATE INDEX IF NOT EXISTS ix_care_chat_message_session_created ON care_chat_message (session_id, created_at)')
 
 
@@ -523,7 +540,7 @@ def create_app():
     app = Flask(__name__, instance_relative_config=True)
     instance_path = Path(app.instance_path)
     instance_path.mkdir(parents=True, exist_ok=True)
-    secret_key, using_ephemeral_secret_key = _resolve_secret_key()
+    secret_key, using_ephemeral_secret_key = _resolve_secret_key(instance_path)
 
     app.config.update(
         SECRET_KEY=secret_key,
@@ -571,7 +588,10 @@ def create_app():
         nonce = getattr(g, 'csp_nonce', '')
         response.headers.setdefault(
             'Content-Security-Policy',
-            "default-src 'self'; script-src 'self' 'nonce-{}' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com; worker-src 'self' blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'".format(nonce),
+            "default-src 'self'; script-src 'nonce-{}' 'strict-dynamic' {} https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com; worker-src 'self' blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'".format(
+                nonce,
+                "'wasm-unsafe-eval'" if request.path.startswith('/break') else '',
+            ),
         )
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')

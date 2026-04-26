@@ -1,4 +1,9 @@
 (function () {
+    if (window.WELLHABIT_DISABLE_EYE_EXERCISE_OVERLAY) {
+        window.WellHabitOpenEyeExercisePrompt = function () {};
+        window.WellHabitEnsureEyeExerciseNotificationPermission = async function () { return 'disabled'; };
+        return;
+    }
     const bootstrap = window.WELLHABIT_BOOTSTRAP || {};
     const prompts = Object.assign({}, bootstrap.prompts || {}, window.WELLHABIT_PROMPTS || {});
     const overlay = document.getElementById('eye-exercise-overlay');
@@ -14,9 +19,11 @@
     const finishedBtn = document.getElementById('eye-exercise-finished-btn');
     const respondUrl = prompts.eyeExerciseRespondUrl || '/eye-exercise/respond';
     const statusUrl = prompts.eyeExerciseStatusUrl || '/eye-exercise/status';
+    const startUrl = prompts.eyeExerciseStartUrl || '/eye-exercise/start';
     let activePrompt = null;
     let activeBrowserNotification = null;
     let lastNotifiedPromptId = null;
+    let manualOpenInProgress = false;
 
     if (!overlay || !messageEl || !yesBtn || !notYetBtn || !noThanksBtn || !finishedBtn) {
         window.WellHabitOpenEyeExercisePrompt = function () {};
@@ -95,6 +102,38 @@
         }
     }
 
+    function clearEyePanelQuery() {
+        try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get('panel') !== 'eye') return;
+            url.searchParams.delete('panel');
+            const cleanUrl = `${url.pathname}${url.search}${url.hash}`;
+            window.history.replaceState({}, '', cleanUrl);
+        } catch (error) {
+            // ignore URL cleanup errors
+        }
+    }
+
+    async function openManualPrompt(options = {}) {
+        if (manualOpenInProgress) return null;
+        manualOpenInProgress = true;
+        try {
+            const response = await fetch(startUrl, {
+                method: 'POST',
+                headers: window.WellHabitCsrfHeaders ? window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }) : { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'nav' }),
+            });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.message || 'Could not open eye exercise.');
+            if (body.avatar_emoji && window.WellHabitSetAvatarEmoji) window.WellHabitSetAvatarEmoji(body.avatar_emoji);
+            if (body.eye_prompt) showPrompt(body.eye_prompt, { forceOverlay: true });
+            if (options.cleanUrl !== false) clearEyePanelQuery();
+            return body;
+        } finally {
+            manualOpenInProgress = false;
+        }
+    }
+
     async function sendAction(action) {
         if (!activePrompt) return null;
         const response = await fetch(respondUrl, {
@@ -150,6 +189,37 @@
         } catch (error) {}
     }
 
+    function openFromUrlIfRequested() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('panel') !== 'eye') return;
+            openManualPrompt({ cleanUrl: true }).catch((error) => window.alert(error.message || 'Could not open eye exercise.'));
+        } catch (error) {
+            // ignore malformed URL state
+        }
+    }
+
+    document.addEventListener('click', (event) => {
+        const link = event.target.closest ? event.target.closest('[data-nav-eye]') : null;
+        if (!link) return;
+        let targetUrl;
+        try {
+            targetUrl = new URL(link.href, window.location.href);
+        } catch (error) {
+            return;
+        }
+        if (targetUrl.origin !== window.location.origin || targetUrl.pathname !== window.location.pathname) return;
+        event.preventDefault();
+        try {
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('panel', 'eye');
+            window.history.replaceState({}, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        } catch (error) {
+            // ignore URL update errors
+        }
+        openManualPrompt({ cleanUrl: true }).catch((error) => window.alert(error.message || 'Could not open eye exercise.'));
+    });
+
     window.WellHabitEnsureEyeExerciseNotificationPermission = async function () {
         if (!(window.Notification && Notification.requestPermission)) return 'unsupported';
         if (Notification.permission === 'granted' || Notification.permission === 'denied') return Notification.permission;
@@ -171,4 +241,6 @@
     window.setInterval(refreshStatus, 60000);
     refreshStatus();
     window.WellHabitOpenEyeExercisePrompt = showPrompt;
+    window.WellHabitOpenManualEyeExercisePrompt = openManualPrompt;
+    openFromUrlIfRequested();
 })();

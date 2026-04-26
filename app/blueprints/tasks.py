@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import uuid4
 
 from flask import Blueprint, flash, jsonify, redirect, request, url_for
 from flask_login import current_user, login_required
@@ -25,10 +26,10 @@ from ..services.eye_exercise import (
 )
 from ..services.hydration import (
     _get_or_create_log_for_date,
+    _increment_water_if_within_limit,
     _infer_beverage_from_text,
     _serialize_prompt,
     _sync_goal_based_hydration_prompts,
-    _water_limit_error,
 )
 from ..services.tasks import (
     _get_next_sort_order,
@@ -46,6 +47,7 @@ from ..services._legacy_support import _parse_int
 
 bp = Blueprint('tasks', __name__)
 
+POMODORO_SERVER_SESSION_KEY = 'pomodoro_server_session'
 
 
 def _sanitize_pomodoro_state_payload(data):
@@ -141,14 +143,13 @@ def toggle_task(task_id):
             task.ai_followup_rating = None
             task.ai_followup_completed_at = None
             if task.task_date == local_today() and _task_is_hydration(task):
-                amount_ml = int(convert_drink_amount_to_ml(_infer_beverage_from_text(task.title), task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
+                amount_ml = GLASS_VOLUME_ML
                 if not int(task.auto_tracked_water_ml or 0):
-                    water_error = _water_limit_error(log.water_ml, amount_ml)
+                    water_error = _increment_water_if_within_limit(log, amount_ml)
                     if water_error:
                         db.session.rollback()
                         flash(water_error, 'warning')
                         return redirect(request.referrer or url_for('main.calendar_view'))
-                    log.water_ml = int(log.water_ml or 0) + amount_ml
                     task.auto_tracked_water_ml = amount_ml
                 else:
                     amount_ml = int(task.auto_tracked_water_ml or amount_ml)
@@ -176,14 +177,13 @@ def toggle_task(task_id):
     elif _task_is_hydration(task):
         log = _get_or_create_log_for_date(current_user.id, task.task_date)
         if task.completed and task.task_date == local_today():
-            amount_ml = int(convert_drink_amount_to_ml(_infer_beverage_from_text(task.title), task.title).get('amount_ml', GLASS_VOLUME_ML) or GLASS_VOLUME_ML)
+            amount_ml = GLASS_VOLUME_ML
             if not int(task.auto_tracked_water_ml or 0):
-                water_error = _water_limit_error(log.water_ml, amount_ml)
+                water_error = _increment_water_if_within_limit(log, amount_ml)
                 if water_error:
                     db.session.rollback()
                     flash(water_error, 'warning')
                     return redirect(request.referrer or url_for('main.calendar_view'))
-                log.water_ml = int(log.water_ml or 0) + amount_ml
                 task.auto_tracked_water_ml = amount_ml
             else:
                 amount_ml = int(task.auto_tracked_water_ml or amount_ml)
@@ -227,7 +227,7 @@ def edit_task(task_id):
     task = Task.query.filter_by(id=task_id, user_id=current_user.id).first_or_404()
     if _task_is_meal(task):
         return jsonify({'message': 'Meal tasks are updated from the meal popup.'}), 400
-    data = request.get_json(silent=True) or request.form
+    data = request.get_json(silent=True) or {}
     new_title = _clean_text(data.get('title'), 200)
     if not new_title:
         return jsonify({'message': 'Task text cannot be empty.'}), 400
@@ -245,7 +245,7 @@ def save_ai_suggestion_followup(task_id):
     if not _task_is_ai_suggestion(task):
         return jsonify({'message': 'This is not an AI suggestion task.'}), 400
 
-    data = request.get_json(silent=True) or request.form
+    data = request.get_json(silent=True) or {}
     rating = _parse_int(data.get('rating'), default=0)
     if rating < 1 or rating > 10:
         return jsonify({'message': 'Choose a number from 1 to 10.'}), 400
@@ -300,7 +300,7 @@ def update_meal_task(task_id):
     if not _task_is_meal(task):
         return jsonify({'message': 'This is not a meal task.'}), 400
 
-    data = request.get_json(silent=True) or request.form
+    data = request.get_json(silent=True) or {}
     meal_status = (data.get('meal_status') or 'finished').strip().lower()
     meal_text = _clean_text(data.get('meal_text'), 300)
     raw_meal_time = (data.get('meal_time') or '').strip()
@@ -421,15 +421,74 @@ def delete_event(event_id):
     return redirect(url_for('main.calendar_view', year=event_date.year, month=event_date.month, selected_date=event_date.isoformat()))
 
 
+
+def _parse_pomodoro_started_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+@bp.route('/pomodoro/start', methods=['POST'])
+@login_required
+def start_pomodoro():
+    data = request.get_json(silent=True) or {}
+    focus_minutes = _parse_int(data.get('focus_minutes'), default=DEFAULT_POMODORO_FOCUS_MINUTES, minimum=1, maximum=180)
+    break_minutes = _parse_int(data.get('break_minutes'), default=DEFAULT_POMODORO_BREAK_MINUTES, minimum=1, maximum=60)
+    cycle_number = _parse_int(data.get('cycle_number'), default=1, minimum=1, maximum=50)
+    activity_label = _clean_text(data.get('activity_label') or DEFAULT_POMODORO_ACTIVITY_LABEL, 200) or DEFAULT_POMODORO_ACTIVITY_LABEL
+    started_at = local_now().replace(tzinfo=None)
+    session_id = uuid4().hex
+    _store_client_state(
+        current_user.id,
+        POMODORO_SERVER_SESSION_KEY,
+        {
+            'session_id': session_id,
+            'started_at': started_at.isoformat(),
+            'focus_minutes': focus_minutes,
+            'break_minutes': break_minutes,
+            'cycle_number': cycle_number,
+            'activity_label': activity_label,
+        },
+    )
+    db.session.commit()
+    return jsonify({
+        'session_id': session_id,
+        'started_at': started_at.isoformat(),
+        'focus_minutes': focus_minutes,
+        'break_minutes': break_minutes,
+        'cycle_number': cycle_number,
+        'activity_label': activity_label,
+    })
+
+
 @bp.route('/pomodoro/save', methods=['POST'])
 @login_required
 def save_pomodoro():
     data = request.get_json(silent=True) or {}
-    focus_minutes = _parse_int(data.get('focus_minutes'), default=DEFAULT_POMODORO_FOCUS_MINUTES, minimum=1, maximum=180)
-    break_minutes = _parse_int(data.get('break_minutes'), default=5, minimum=1, maximum=60)
-    cycle_number = _parse_int(data.get('cycle_number'), default=1, minimum=1, maximum=50)
-    activity_label = _clean_text(data.get('activity_label') or 'work', 200) or 'work'
+    session_id = _clean_text(data.get('session_id'), 80)
+    server_state = _peek_client_state_for_user(current_user.id, POMODORO_SERVER_SESSION_KEY)
+    if not session_id or not server_state or server_state.get('session_id') != session_id:
+        return jsonify({'message': 'Pomodoro session was not started on the server.'}), 400
+
     completed_at = local_now().replace(tzinfo=None)
+    started_at = _parse_pomodoro_started_at(server_state.get('started_at'))
+    if not started_at:
+        _store_client_state(current_user.id, POMODORO_SERVER_SESSION_KEY, None)
+        db.session.commit()
+        return jsonify({'message': 'Pomodoro session start time was invalid.'}), 400
+
+    elapsed_minutes = int(max(0, (completed_at - started_at).total_seconds()) // 60)
+    if elapsed_minutes < 1:
+        return jsonify({'message': 'Focus session is too short to save.'}), 400
+
+    requested_focus = _parse_int(data.get('focus_minutes'), default=int(server_state.get('focus_minutes') or DEFAULT_POMODORO_FOCUS_MINUTES), minimum=1, maximum=180)
+    focus_minutes = max(1, min(requested_focus, elapsed_minutes, 180))
+    break_minutes = _parse_int(server_state.get('break_minutes'), default=DEFAULT_POMODORO_BREAK_MINUTES, minimum=1, maximum=60)
+    cycle_number = _parse_int(server_state.get('cycle_number'), default=1, minimum=1, maximum=50)
+    activity_label = _clean_text(server_state.get('activity_label') or data.get('activity_label') or 'work', 200) or 'work'
 
     session_row = PomodoroSession(
         user_id=current_user.id,
@@ -457,6 +516,7 @@ def save_pomodoro():
         event_at=completed_at,
         impacts=payload.get('feedback', {}).get('metrics'),
     )
+    _store_client_state(current_user.id, POMODORO_SERVER_SESSION_KEY, None)
     db.session.commit()
     _consume_wellness_feedback()
     return jsonify(

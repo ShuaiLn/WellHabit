@@ -6,9 +6,14 @@ from flask_login import current_user, login_required
 
 from .. import db
 from ..ai_services import convert_drink_amount_to_ml, suggest_personal_goals
-from ..constants import BREAK_EXERCISES, HISTORY_PAGE_SIZE
+from ..constants import BREAK_EXERCISES, EYE_EXERCISE_THRESHOLD_MINUTES, HISTORY_PAGE_SIZE
 from ..services.care_chat import _care_chat_history_payload, _get_or_create_active_care_chat_session
 from ..services.care_intents import CARE_BOUNDARY_LINES
+from ..services.eye_exercise import (
+    _complete_eye_exercise,
+    _get_active_eye_exercise_prompt,
+    _serialize_eye_exercise_prompt,
+)
 from ..models import ActivityEntry, BreakSession, CalendarEvent, DailyLog, Task
 from ..services._legacy_support import _parse_clock_text, _parse_float, _parse_int
 from ..services.activity import _activity_entry_view_model, _add_calendar_event, _event_sort_key, _log_activity_entry, _recent_activity_preview
@@ -29,13 +34,13 @@ from ..services.hydration import (
     _get_or_create_log_for_date,
     _get_or_create_log_for_today,
     _hydration_goal_plan,
+    _increment_water_if_within_limit,
     _hydration_schedule_rows,
     _missed_hydration_summary,
     _serialize_prompt,
     _sync_goal_based_hydration_prompts,
     _sync_meal_task_completion,
     _update_log_meal_insight,
-    _water_limit_error,
 )
 from ..services.tasks import _ensure_daily_default_tasks, _get_next_sort_order
 from ..services.wellness import (
@@ -225,6 +230,38 @@ def dashboard():
         care_boundary_lines=CARE_BOUNDARY_LINES,
     )
 
+
+
+@bp.route('/eye-exercise')
+@login_required
+def eye_exercise_view():
+    active_prompt = _get_active_eye_exercise_prompt(current_user.id)
+    db.session.commit()
+    return render_template(
+        'eye_exercise_page.html',
+        active_eye_prompt=_serialize_eye_exercise_prompt(active_prompt),
+        eye_exercise_threshold=EYE_EXERCISE_THRESHOLD_MINUTES,
+        eye_exercise_embed_url='https://www.youtube.com/embed/iVb4vUp70zY',
+    )
+
+
+@bp.route('/eye-exercise/finish', methods=['POST'])
+@login_required
+def eye_exercise_finish_page():
+    now = local_now().replace(tzinfo=None)
+    completion = _complete_eye_exercise(current_user, local_today(), now, source_label='manual page')
+    payload = completion.get('payload') or {}
+    _log_activity_entry(
+        current_user.id,
+        'eye_exercise',
+        'Eye exercise finished',
+        completion.get('event_label') or 'Eye exercise finished · manual page',
+        event_at=now,
+        impacts=payload.get('feedback', {}).get('metrics'),
+    )
+    db.session.commit()
+    flash('Eye exercise saved.', 'success')
+    return redirect(url_for('main.eye_exercise_view'))
 
 
 @bp.route('/break')
@@ -496,11 +533,10 @@ def logs():
         if water_amount:
             water_conversion = convert_drink_amount_to_ml('water', water_amount)
             added_water = int(water_conversion['amount_ml'])
-            water_error = _water_limit_error(log.water_ml, added_water)
+            water_error = _increment_water_if_within_limit(log, added_water)
             if water_error:
                 flash(water_error, 'warning')
                 return redirect(url_for('main.logs', date=selected_date.isoformat()))
-            log.water_ml = int(log.water_ml or 0) + added_water
             changes.append(f'water +{added_water} ml')
 
         sleep_update = _apply_sleep_submission(log, request.form, selected_date)

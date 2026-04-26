@@ -10,6 +10,7 @@ from ..services.eye_exercise import (
     _complete_eye_exercise,
     _dismiss_eye_exercise_task,
     _ensure_eye_exercise_task,
+    _ensure_care_eye_exercise_prompt,
     _get_active_eye_exercise_prompt,
     _get_or_create_eye_exercise_state,
     _serialize_eye_exercise_prompt,
@@ -18,12 +19,12 @@ from ..services.hydration import (
     _get_due_and_upcoming_prompt,
     _get_or_create_log_for_today,
     _hydration_prompt_label,
+    _increment_water_if_within_limit,
     _missed_hydration_summary,
     _normalize_beverage,
     _serialize_prompt,
     _sleep_reminder_payload,
     _sync_goal_based_hydration_prompts,
-    _water_limit_error,
 )
 from ..services.tasks import _get_next_sort_order
 from ..services.wellness import _apply_wellness_update, _serialize_wellness
@@ -43,10 +44,23 @@ def eye_exercise_status():
     return jsonify({'eye_prompt': _serialize_eye_exercise_prompt(prompt), 'avatar_emoji': current_user.avatar_emoji or '🙂'})
 
 
+@bp.route('/eye-exercise/start', methods=['POST'])
+@login_required
+def eye_exercise_start():
+    """Create or reuse an eye-exercise prompt when the user opens it manually."""
+    prompt = _ensure_care_eye_exercise_prompt(current_user.id)
+    db.session.commit()
+    return jsonify({
+        'message': 'Eye exercise prompt opened.',
+        'eye_prompt': _serialize_eye_exercise_prompt(prompt),
+        'avatar_emoji': current_user.avatar_emoji or '🙂',
+    })
+
+
 @bp.route('/eye-exercise/respond', methods=['POST'])
 @login_required
 def eye_exercise_respond():
-    data = request.get_json(silent=True) or request.form
+    data = request.get_json(silent=True) or {}
     prompt_id = data.get('prompt_id')
     action = _clean_text(data.get('action') or data.get('response_status') or '', 20).lower()
 
@@ -180,7 +194,7 @@ def hydration_status():
 @bp.route('/hydration/respond', methods=['POST'])
 @login_required
 def hydration_respond():
-    data = request.get_json(silent=True) or request.form
+    data = request.get_json(silent=True) or {}
     prompt_id = data.get('prompt_id')
     prompt_type = _clean_text(data.get('prompt_type') or 'scheduled_wake', 30).lower()
     action = _clean_text(data.get('action') or data.get('response_status') or '', 20).lower()
@@ -209,24 +223,42 @@ def hydration_respond():
         return jsonify({'message': 'Please type your drink name when you choose Other.'}), 400
 
     normalized_beverage = _normalize_beverage(beverage, custom_beverage)
-    prompt.beverage = normalized_beverage
-    prompt.custom_beverage = custom_beverage or None
-    prompt.responded_at = local_now().replace(tzinfo=None)
+    now = local_now().replace(tzinfo=None)
 
     if action in {'finished', 'done'}:
         amount_ml = convert_drink_amount_to_ml(normalized_beverage, amount_text).get('amount_ml', 250) if amount_text else 250
         log = _get_or_create_log_for_today(current_user.id)
-        water_error = _water_limit_error(log.water_ml, amount_ml)
+        prompt_claimed = HydrationPrompt.query.filter_by(
+            id=prompt.id,
+            user_id=current_user.id,
+            response_status='pending',
+        ).update(
+            {
+                'response_status': 'finished',
+                'beverage': normalized_beverage,
+                'custom_beverage': custom_beverage or None,
+                'responded_at': now,
+                'log_id': log.id,
+            },
+            synchronize_session=False,
+        )
+        if prompt_claimed != 1:
+            db.session.rollback()
+            return jsonify({'message': 'This hydration prompt was already answered.'}), 409
+        water_error = _increment_water_if_within_limit(log, amount_ml)
         if water_error:
+            db.session.rollback()
             return jsonify({'message': water_error}), 400
-        prompt.response_status = 'finished'
-        log.water_ml = int(log.water_ml or 0) + int(amount_ml)
-        db.session.flush()
         payload = _apply_wellness_update(current_user, log.log_date, f'Drank {amount_ml} ml of {normalized_beverage}')
         _log_activity_entry(current_user.id, 'hydration', 'Hydration logged', f'{amount_ml} ml {normalized_beverage}', impacts=payload.get('feedback', {}).get('metrics'))
         _sync_goal_based_hydration_prompts(current_user, log.log_date)
         message = f"Great job. Added {amount_ml} ml to today's water total."
     elif action == 'not_yet':
+        if prompt.response_status != 'pending':
+            return jsonify({'message': 'This hydration prompt was already answered.'}), 409
+        prompt.beverage = normalized_beverage
+        prompt.custom_beverage = custom_beverage or None
+        prompt.responded_at = now
         prompt.response_status = 'dismissed'
         task_date = local_today()
         reminder_text = _hydration_prompt_label(prompt.prompt_type)
@@ -247,6 +279,11 @@ def hydration_respond():
         _sync_goal_based_hydration_prompts(current_user, local_today())
         message = "Okay. I added a water task to today's todo list. The next automatic reminder will wait for your next scheduled water time."
     else:
+        if prompt.response_status != 'pending':
+            return jsonify({'message': 'This hydration prompt was already answered.'}), 409
+        prompt.beverage = normalized_beverage
+        prompt.custom_beverage = custom_beverage or None
+        prompt.responded_at = now
         prompt.response_status = 'dismissed'
         db.session.flush()
         payload = _apply_wellness_update(current_user, local_today(), 'Hydration reminder skipped')

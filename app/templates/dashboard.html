@@ -285,6 +285,7 @@ if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && windo
     function readRequestedPanel() {
         const params = new URLSearchParams(window.location.search);
         const fromUrl = params.get('panel');
+        if (fromUrl === 'eye') return 'todo';
         if (validPanels.has(fromUrl)) return fromUrl;
         try {
             const saved = localStorage.getItem(storageKey);
@@ -541,7 +542,7 @@ if (todoListEl) {
     window.WellHabitFatigueCooldownUntil = ts;
 })();
 </script>
-<script src="{{ url_for('static', filename='fatigue_monitor.js') }}" defer></script>
-<script src="{{ url_for('static', filename='care_chat.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='fatigue_monitor.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='care_chat.js') }}" defer></script>
 {% endblock %}
 

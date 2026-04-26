@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from flask import current_app, flash, has_request_context, jsonify, redirect, render_template, request, session, url_for
+from flask import current_app, flash, g, has_request_context, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy.exc import IntegrityError
 
@@ -53,9 +53,11 @@ from ..models import ActivityEntry, CalendarEvent, CareChatMessage, CareChatSess
 
 LOCAL_TZ = ZoneInfo(APP_TIMEZONE)
 EYE_EXERCISE_VIDEO_URL = 'https://www.youtube.com/watch?v=iVb4vUp70zY'
+EYE_EXERCISE_EMBED_FALLBACK = 'https://www.youtube-nocookie.com/embed/iVb4vUp70zY'
 GOAL_INTENSITY_CHOICES = [('easy', 'Easy'), ('medium', 'Medium'), ('hard', 'Hard')]
 
 UTC_TZ = ZoneInfo(UTC_TIMEZONE)
+_last_client_state_pruned_on: date | None = None
 
 CARE_BOUNDARY_LINES = [
     'This is habit support, not medical advice.',
@@ -819,6 +821,15 @@ def _prune_client_states() -> None:
     ClientState.query.filter(ClientState.created_at < cutoff).delete(synchronize_session=False)
 
 
+def _prune_client_states_once_per_day() -> None:
+    global _last_client_state_pruned_on
+    today = local_today()
+    if _last_client_state_pruned_on == today:
+        return
+    _prune_client_states()
+    _last_client_state_pruned_on = today
+
+
 
 def _store_client_state(user_id: int, state_key: str, payload: dict | None) -> None:
     if not payload:
@@ -840,8 +851,34 @@ def _store_client_state(user_id: int, state_key: str, payload: dict | None) -> N
                 created_at=now,
             )
         )
-    _prune_client_states()
+    _prune_client_states_once_per_day()
     db.session.flush()
+
+
+
+def _session_state_key(state_key: str) -> str:
+    return f'wellhabit:{state_key}'[:80]
+
+
+
+def _store_session_state(state_key: str, payload: dict | None) -> None:
+    if not has_request_context():
+        return
+    key = _session_state_key(state_key)
+    if payload:
+        session[key] = payload
+    else:
+        session.pop(key, None)
+    session.modified = True
+
+
+
+def _consume_session_state(state_key: str) -> dict | None:
+    if not has_request_context():
+        return None
+    payload = session.pop(_session_state_key(state_key), None)
+    session.modified = True
+    return payload if isinstance(payload, dict) else None
 
 
 
@@ -872,24 +909,34 @@ def _consume_client_state(state_key: str) -> dict | None:
     try:
         payload = json.loads(row.payload_json)
     except Exception:
-        logger.warning('Could not decode client state payload', exc_info=True, extra={'state_key': state_key, 'user_id': current_user.id})
-        payload = None
+        logger.warning(
+            'Could not decode client state payload',
+            exc_info=True,
+            extra={
+                'state_key': state_key,
+                'user_id': current_user.id,
+                'payload_length': len(row.payload_json or ''),
+            },
+        )
+        db.session.delete(row)
+        db.session.flush()
+        flash("We couldn't restore your pending update — please try again.", 'warning')
+        return None
     db.session.delete(row)
-    db.session.commit()
+    db.session.flush()
     return payload if isinstance(payload, dict) else None
 
 
 
 def _consume_ai_suggestion_followup() -> dict | None:
-    return _consume_client_state('pending_ai_suggestion_followup')
+    return _consume_session_state('pending_ai_suggestion_followup')
 
 
 
 def _queue_ai_suggestion_followup(task: Task, follow_up_question: str | None = None) -> None:
     if not has_request_context() or not task:
         return
-    _store_client_state(
-        task.user_id,
+    _store_session_state(
         'pending_ai_suggestion_followup',
         {
             'task_id': int(task.id),
@@ -901,7 +948,7 @@ def _queue_ai_suggestion_followup(task: Task, follow_up_question: str | None = N
 
 
 def _consume_ai_suggestion_added() -> dict | None:
-    return _consume_client_state('pending_ai_suggestion_added')
+    return _consume_session_state('pending_ai_suggestion_added')
 
 
 
@@ -909,8 +956,7 @@ def _queue_ai_suggestion_added(task: Task, source_label: str | None = None) -> N
     if not has_request_context() or not task:
         return
     clean_source = str(source_label or task.ai_generated_source or 'ai').replace('_', ' ').strip() or 'ai'
-    _store_client_state(
-        task.user_id,
+    _store_session_state(
         'pending_ai_suggestion_added',
         {
             'task_id': int(task.id),
@@ -1451,7 +1497,8 @@ def _sync_overdue_tasks_once_per_day(user: User) -> None:
     if user.last_task_rollover_on == today:
         return
     rollover_result = _roll_over_pending_tasks(user.id)
-    user.last_task_rollover_on = today
+    if int((rollover_result or {}).get('remaining_count') or 0) <= 0:
+        user.last_task_rollover_on = today
     db.session.commit()
     if rollover_result['moved_count'] or rollover_result['remaining_count']:
         logger.info(
@@ -1663,6 +1710,30 @@ def _water_limit_error(current_total_ml: int | float | None, added_ml: int | flo
     if current_ml + amount_ml > MAX_DAILY_WATER_ML:
         return f"Today's water total cannot exceed {MAX_DAILY_WATER_ML} ml."
     return None
+
+
+def _increment_water_if_within_limit(log: DailyLog, added_ml: int | float | None) -> str | None:
+    amount_ml = max(int(added_ml or 0), 0)
+    single_entry_error = _water_limit_error(0, amount_ml)
+    if single_entry_error:
+        return single_entry_error
+
+    updated_rows = (
+        DailyLog.query
+        .filter(
+            DailyLog.id == log.id,
+            (DailyLog.water_ml + amount_ml) <= MAX_DAILY_WATER_ML,
+        )
+        .update({DailyLog.water_ml: DailyLog.water_ml + amount_ml}, synchronize_session=False)
+    )
+    if updated_rows != 1:
+        db.session.refresh(log)
+        return _water_limit_error(log.water_ml, amount_ml) or f"Today's water total cannot exceed {MAX_DAILY_WATER_ML} ml."
+
+    db.session.flush()
+    db.session.refresh(log)
+    return None
+
 
 
 def _get_active_care_chat_session(user_id: int) -> CareChatSession | None:
@@ -2220,6 +2291,20 @@ def _get_active_eye_exercise_prompt(user_id: int) -> EyeExercisePrompt | None:
 
 
 
+def _to_embed_url(watch_url: str | None) -> str:
+    text = (watch_url or '').strip()
+    patterns = [
+        r'[?&]v=([\w-]{6,})',
+        r'youtu\.be/([\w-]{6,})',
+        r'/embed/([\w-]{6,})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return f'https://www.youtube-nocookie.com/embed/{match.group(1)}'
+    return EYE_EXERCISE_EMBED_FALLBACK
+
+
 def _serialize_eye_exercise_prompt(prompt: EyeExercisePrompt | None):
     if not prompt:
         return None
@@ -2235,7 +2320,7 @@ def _serialize_eye_exercise_prompt(prompt: EyeExercisePrompt | None):
         'threshold_minutes': int(prompt.threshold_minutes or EYE_EXERCISE_THRESHOLD_MINUTES),
         'response_status': prompt.response_status,
         'video_url': prompt.video_url or EYE_EXERCISE_VIDEO_URL,
-        'embed_url': 'https://www.youtube.com/embed/iVb4vUp70zY',
+        'embed_url': _to_embed_url(prompt.video_url or EYE_EXERCISE_VIDEO_URL),
         'due_at_iso': prompt.due_at.isoformat() if prompt.due_at else None,
         'source_text': 'Source: YouTube · lenstark.com',
     }
@@ -2264,9 +2349,22 @@ def _ensure_eye_exercise_task(user_id: int, task_date: date, focus_minutes: int 
 
 def _dismiss_eye_exercise_task(user_id: int, task_date: date | None = None) -> None:
     chosen_date = task_date or local_today()
-    pending_tasks = Task.query.filter_by(user_id=user_id, task_date=chosen_date, task_type='eye_exercise', completed=False).all()
+    now = local_now().replace(tzinfo=None)
+    pending_tasks = Task.query.filter(
+        Task.user_id == user_id,
+        Task.task_date == chosen_date,
+        Task.task_type == 'eye_exercise',
+        Task.completed.is_(False),
+        db.or_(
+            Task.description.ilike('Recommended%'),
+            Task.ai_generated_source.in_(['system', 'pattern_recognition', 'eye_exercise']),
+        ),
+    ).all()
     for task in pending_tasks:
-        db.session.delete(task)
+        task.completed = True
+        task.completed_at = now
+        description = (task.description or '').strip()
+        task.description = (description + ' Dismissed.').strip() if description else 'Dismissed.'
 
 
 
@@ -2423,11 +2521,17 @@ def _score_snapshot(user: User) -> dict[str, int]:
 
 
 def _serialize_wellness(user: User):
+    cache_key = f'_wellness_metrics_{getattr(user, "id", "anon")}'
+    if has_request_context() and hasattr(g, cache_key):
+        return getattr(g, cache_key)
     score_map = _score_snapshot(user)
-    return [
+    metrics = [
         {'key': key, 'label': label, 'subtitle': subtitle, 'value': score_map[key]}
         for key, label, subtitle in WELLNESS_META
     ]
+    if has_request_context():
+        setattr(g, cache_key, metrics)
+    return metrics
 
 
 def _wellness_label_map() -> dict[str, str]:
@@ -2500,12 +2604,12 @@ def _build_wellness_feedback(payload: dict, previous_scores: dict[str, int]) -> 
 
 def _store_wellness_feedback(feedback: dict | None) -> None:
     if has_request_context() and current_user.is_authenticated:
-        _store_client_state(current_user.id, 'pending_wellness_feedback', feedback)
+        _store_session_state('pending_wellness_feedback', feedback)
 
 
 
 def _consume_wellness_feedback() -> dict | None:
-    return _consume_client_state('pending_wellness_feedback')
+    return _consume_session_state('pending_wellness_feedback')
 
 
 

@@ -23,12 +23,17 @@
                 <div class="nav-links">
                     {% if current_user.is_authenticated %}
                         <a href="{{ url_for('main.dashboard') }}">Home</a>
+                        <a href="{{ url_for('main.break_view') }}">Yoga</a>
+                        <a href="{{ url_for('main.dashboard', panel='eye') }}" data-nav-eye="1">Eye Exercise</a>
                         <a href="{{ url_for('main.logs') }}">Logs</a>
                         <a href="{{ url_for('main.calendar_view') }}">Calendar</a>
                         <a href="{{ url_for('main.dashboard', panel='care') }}" data-nav-care="1">Care AI</a>
                         <a href="{{ url_for('main.history_view') }}">History</a>
                         <a href="{{ url_for('main.profile') }}">Profile</a>
-                        <a href="{{ url_for('auth.logout') }}">Logout</a>
+                        <form class="nav-logout-form" method="post" action="{{ url_for('auth.logout') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="nav-link-button">Logout</button>
+                        </form>
                     {% else %}
                         <a href="{{ url_for('auth.login') }}">Login</a>
                         <a href="{{ url_for('auth.register') }}">Register</a>
@@ -188,10 +193,12 @@
             'sleepStatusUrl': (url_for('reminders.sleep_status') if current_user.is_authenticated else None),
             'eyeExerciseStatusUrl': (url_for('reminders.eye_exercise_status') if current_user.is_authenticated else None),
             'eyeExerciseRespondUrl': (url_for('reminders.eye_exercise_respond') if current_user.is_authenticated else None),
+            'eyeExerciseStartUrl': (url_for('reminders.eye_exercise_start') if current_user.is_authenticated else None),
             'missedSummary': hydration_missed_summary|default(None)
         }|tojson }},
         timer: {{ {
             'saveUrl': (url_for('tasks.save_pomodoro') if current_user.is_authenticated else None),
+            'startUrl': (url_for('tasks.start_pomodoro') if current_user.is_authenticated else None),
             'stateUrl': (url_for('tasks.pomodoro_state') if current_user.is_authenticated else None),
             'focusMinutes': app_ui_defaults.focus_minutes,
             'breakMinutes': app_ui_defaults.break_minutes,
@@ -202,17 +209,17 @@
     window.currentAvatarEmoji = window.WELLHABIT_BOOTSTRAP.avatarEmoji || '🙂';
     window.WELLHABIT_PROMPTS = Object.assign({}, window.WELLHABIT_BOOTSTRAP.prompts || {}, window.WELLHABIT_PROMPTS || {});
     </script>
-    <script src="{{ url_for('static', filename='csrf.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='nav_clock.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='csrf.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='nav_clock.js') }}" defer></script>
     {% if current_user.is_authenticated %}
-    <script src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='eye_exercise.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='pomodoro_timer.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='timer_widget.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='hydration.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='eye_exercise.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pomodoro_timer.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='timer_widget.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='hydration.js') }}" defer></script>
+    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
     {% endif %}
 
     {% block scripts %}{% endblock %}

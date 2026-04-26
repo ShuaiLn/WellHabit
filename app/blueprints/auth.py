@@ -1,4 +1,4 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from .. import db
@@ -67,6 +67,7 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and user.check_password(password):
+            session.clear()
             login_user(user)
             if not user.wellness_updated_at:
                 _ensure_baseline_scores(user)
@@ -79,7 +80,7 @@ def login():
     return render_template('login.html')
 
 
-@bp.route('/logout')
+@bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
     logout_user()

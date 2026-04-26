@@ -25,7 +25,11 @@
             card.classList.add('is-responded');
             const actionRow = card.querySelector('.pattern-action-row');
             if (actionRow) {
-                actionRow.innerHTML = `<span class="pattern-response-status">${data.message || 'Saved.'}</span>`;
+                actionRow.textContent = '';
+                const status = document.createElement('span');
+                status.className = 'pattern-response-status';
+                status.textContent = data.message || 'Saved.';
+                actionRow.appendChild(status);
             }
         });
     }

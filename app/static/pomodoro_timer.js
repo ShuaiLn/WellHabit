@@ -4,6 +4,7 @@
     const STORAGE_KEY = 'wellhabitPomodoroState';
     const LOCK_PREFIX = 'wellhabitPomodoroSaved:';
     const SAVE_URL = timerConfig.saveUrl || '/tasks/pomodoro/save';
+    const START_URL = timerConfig.startUrl || '/tasks/pomodoro/start';
     const STATE_URL = timerConfig.stateUrl || '/tasks/pomodoro/state';
     const listeners = [];
 
@@ -260,6 +261,23 @@
         return `${minutes}:${seconds}`;
     }
 
+    async function startServerFocusSession(state) {
+        const response = await fetch(START_URL, {
+            method: 'POST',
+            headers: window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                focus_minutes: state.focusMinutes,
+                break_minutes: state.breakMinutes,
+                cycle_number: state.cycleNumber,
+                activity_label: state.activityLabel || 'work',
+            }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.session_id) throw new Error(body.message || 'Start failed');
+        return body.session_id;
+    }
+
+
     async function saveFocusSession(state) {
         if (!state.sessionKey) return;
         const lockKey = LOCK_PREFIX + state.sessionKey;
@@ -270,6 +288,7 @@
                 method: 'POST',
                 headers: window.WellHabitCsrfHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
+                    session_id: state.sessionKey,
                     focus_minutes: state.focusMinutes,
                     break_minutes: state.breakMinutes,
                     cycle_number: state.cycleNumber,
@@ -371,7 +390,14 @@
             const currentSeconds = getRemainingSeconds(state);
             state.remainingSeconds = currentSeconds > 0 ? currentSeconds : (state.mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
             if (state.mode === 'focus' && !state.sessionKey) {
-                state.sessionKey = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+                try {
+                    state.sessionKey = await startServerFocusSession(state);
+                } catch (error) {
+                    state.isRunning = false;
+                    state.endAtMs = null;
+                    state.lastMessage = 'Timer could not start because the server session was not created.';
+                    return writeState(state);
+                }
             }
             state.isRunning = true;
             state.endAtMs = Date.now() + state.remainingSeconds * 1000;
