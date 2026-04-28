@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 160" role="img" aria-label="Eye reset illustration">
+  <rect width="220" height="160" rx="28" fill="#eef8f0"/>
+  <path d="M32 82c22-34 52-50 78-50s56 16 78 50c-22 34-52 50-78 50S54 116 32 82Z" fill="#fff" stroke="#7dbb89" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="110" cy="82" r="28" fill="#b7dfbf"/>
+  <circle cx="110" cy="82" r="13" fill="#3d6f4a"/>
+  <circle cx="101" cy="72" r="5" fill="#fff" opacity=".9"/>
+  <path d="M48 38c-10 7-18 16-24 27M172 38c10 7 18 16 24 27M62 130c15 12 31 18 48 18s33-6 48-18" fill="none" stroke="#7dbb89" stroke-width="6" stroke-linecap="round"/>
+</svg>

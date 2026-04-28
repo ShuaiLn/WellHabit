@@ -87,7 +87,7 @@
                 </div>
                 <div class="fatigue-toast" id="fatigue-toast" hidden></div>
             </div>
-            <div class="fatigue-monitor-panel" id="fatigue-monitor-panel" data-report-url="{{ url_for('main.pomodoro_fatigue_signal') }}">
+            <div class="fatigue-monitor-panel" id="fatigue-monitor-panel" data-report-url="{{ url_for('main.pomodoro_fatigue_signal') }}" data-model-url="{{ url_for('static', filename='break_assets/face_landmarker.task') }}">
                 <div class="fatigue-score-row">
                     <div>
                         <p class="eyebrow">Possible fatigue score</p>
@@ -256,6 +256,7 @@ window.WELLHABIT_CARE = {
         input: 'home-care-input',
         sendBtn: 'home-care-send-btn',
         endBtn: 'home-care-end-btn',
+        micBtn: 'home-care-mic-btn',
         status: 'home-care-status-line'
     },
     quickButtonSelector: '#right-panel-care .care-quick-btn'

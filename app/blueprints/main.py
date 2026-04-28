@@ -235,14 +235,7 @@ def dashboard():
 @bp.route('/eye-exercise')
 @login_required
 def eye_exercise_view():
-    active_prompt = _get_active_eye_exercise_prompt(current_user.id)
-    db.session.commit()
-    return render_template(
-        'eye_exercise_page.html',
-        active_eye_prompt=_serialize_eye_exercise_prompt(active_prompt),
-        eye_exercise_threshold=EYE_EXERCISE_THRESHOLD_MINUTES,
-        eye_exercise_embed_url='https://www.youtube.com/embed/iVb4vUp70zY',
-    )
+    return redirect(url_for('main.break_view', exercise='eye_reset'))
 
 
 @bp.route('/eye-exercise/finish', methods=['POST'])
@@ -261,7 +254,7 @@ def eye_exercise_finish_page():
     )
     db.session.commit()
     flash('Eye exercise saved.', 'success')
-    return redirect(url_for('main.eye_exercise_view'))
+    return redirect(url_for('main.break_view', exercise='eye_reset'))
 
 
 @bp.route('/break')
@@ -270,7 +263,9 @@ def break_view():
     reason = (request.args.get('reason') or 'manual').strip().lower() or 'manual'
     if reason not in {'manual', 'fatigue'}:
         reason = 'manual'
-    default_exercise_key = _default_break_key(reason)
+    requested_exercise = (request.args.get('exercise') or '').strip().lower()
+    exercise_keys = {item['key'] for item in BREAK_EXERCISES}
+    default_exercise_key = requested_exercise if requested_exercise in exercise_keys else _default_break_key(reason)
     suggested_duration_sec = 300 if reason == 'fatigue' else 180
     return render_template(
         'break.html',
@@ -279,6 +274,7 @@ def break_view():
         default_exercise_key=default_exercise_key,
         suggested_duration_sec=suggested_duration_sec,
         time_of_day_copy=_time_of_day_copy(),
+        eye_exercise_embed_url='https://www.youtube.com/embed/iVb4vUp70zY?autoplay=1&rel=0',
     )
 
 
@@ -346,6 +342,19 @@ def profile():
 
     if request.method == 'POST':
         action = (request.form.get('action') or 'save_profile').strip().lower()
+
+        if action == 'update_voice_settings':
+            current_user.tts_enabled = (request.form.get('tts_enabled') == '1')
+            current_user.tts_rate = float(_parse_float(request.form.get('tts_rate'), default=1.0) or 1.0)
+            current_user.tts_rate = max(0.5, min(1.5, current_user.tts_rate))
+            current_user.tts_voice_uri = _clean_text(request.form.get('tts_voice_uri'), 255) or None
+            current_user.tts_voice_name = _clean_text(request.form.get('tts_voice_name'), 160) or None
+            current_user.tts_voice_lang = _clean_text(request.form.get('tts_voice_lang'), 20) or 'en-US'
+            voice_preference = (request.form.get('tts_voice_preference') or 'default').strip().lower()
+            current_user.tts_voice_preference = voice_preference if voice_preference in {'default', 'female', 'male'} else 'default'
+            db.session.commit()
+            flash('Voice settings were updated.', 'success')
+            return redirect(url_for('main.profile'))
 
         if action == 'update_hydration_schedule':
             if not locked:

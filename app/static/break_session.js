@@ -28,7 +28,7 @@ const state = {
 };
 
 const els = {
-    fullPicker: $('full-picker'), workspace: $('break-workspace'), video: $('break-video'), canvas: $('break-canvas'), orb: $('breathing-orb'), guide: $('guide-overlay'), placeholder: $('break-placeholder'), placeholderText: $('break-placeholder-text'),
+    fullPicker: $('full-picker'), workspace: $('break-workspace'), video: $('break-video'), canvas: $('break-canvas'), eyeIframe: $('break-eye-iframe'), orb: $('breathing-orb'), guide: $('guide-overlay'), placeholder: $('break-placeholder'), placeholderText: $('break-placeholder-text'),
     scoreBadge: $('alignment-score-badge'), statePill: $('break-state-pill'), totalTimer: $('break-total-timer'), progressFill: $('break-progress-fill'), cameraStatus: $('break-camera-status'), modelStatus: $('break-model-status'), phase: $('break-current-phase'), completed: $('break-completed-count'), title: $('current-exercise-title'), desc: $('current-exercise-desc'), type: $('current-exercise-type'), startBtn: $('exercise-start-btn'), endBtn: $('break-end-btn'), skipCameraBtn: $('break-skip-camera-btn'), modal: $('self-report-modal'), seeAll: $('break-see-all-btn'), seeAllSide: $('break-see-all-side-btn'),
     consentToast: $('pose-consent-toast'), consentOk: $('pose-consent-ok'), consentSkip: $('pose-consent-skip'),
 };
@@ -47,6 +47,13 @@ function activeExercise() { return exerciseMap[state.currentExercise] || exercis
 function isCameraExercise(exercise = activeExercise()) { return exercise.camera_required === 'required'; }
 function canUseCamera() { return state.cameraReady && state.modelReady && state.monitor && !state.detectionSkipped; }
 function exerciseClockPaused() { return state.pausedForVisibility || state.awaitingPerson || document.visibilityState !== 'visible'; }
+function urlExerciseParam() {
+    try { return new URLSearchParams(window.location.search).get('exercise'); }
+    catch (error) { return null; }
+}
+function shouldAutoStartEyeReset() {
+    return activeExercise().key === 'eye_reset' && urlExerciseParam() === 'eye_reset';
+}
 
 function updateExerciseUi() {
     const ex = activeExercise();
@@ -70,7 +77,17 @@ function showPicker(show) {
     if (els.fullPicker) els.fullPicker.hidden = !show;
     if (els.workspace) els.workspace.hidden = show;
 }
+function showEyeExerciseSurface(show) {
+    if (!els.eyeIframe) return;
+    els.eyeIframe.hidden = !show;
+    if (show) {
+        els.eyeIframe.src = cfg.eyeExerciseEmbedUrl || 'https://www.youtube.com/embed/iVb4vUp70zY';
+    } else {
+        els.eyeIframe.src = '';
+    }
+}
 function showCameraSurface(showVideo) {
+    if (showVideo) showEyeExerciseSurface(false);
     if (els.video) els.video.hidden = !showVideo;
     if (els.canvas) els.canvas.hidden = !showVideo;
     if (els.placeholder) els.placeholder.hidden = showVideo;
@@ -142,6 +159,7 @@ function completeCurrentExercise() {
     clearInterval(state.exerciseTimer); state.exerciseTimer = null;
     state.awaitingPerson = false;
     if (els.orb) els.orb.hidden = true;
+    showEyeExerciseSurface(false);
     if (els.scoreBadge) els.scoreBadge.hidden = true;
     setPhase('completed', `${ex.title} complete. Choose another exercise or end the break.`);
     updateExerciseUi();
@@ -155,12 +173,19 @@ function startExercise() {
         return;
     }
     showPicker(false);
-    if (canUseCamera() && ex.camera_required !== 'none') {
+    if (ex.key === 'eye_reset') {
+        state.monitor?.pause();
+        showCameraSurface(false);
+        showEyeExerciseSurface(true);
+        if (els.placeholder) els.placeholder.hidden = true;
+    } else if (canUseCamera() && ex.camera_required !== 'none') {
+        showEyeExerciseSurface(false);
         showCameraSurface(true);
         state.monitor.setExercise(ex.key, ex);
         state.monitor.resume();
     } else {
         state.monitor?.pause();
+        showEyeExerciseSurface(false);
         showCameraSurface(false);
         setText(els.placeholderText, 'Camera off · visual guide only');
     }
@@ -180,7 +205,8 @@ function startExercise() {
         updateOrb(ex, elapsed);
         const phase = phaseForExercise(ex, elapsed);
         setText(els.phase, `Phase: ${phase.label}`);
-        if (!canUseCamera() || ex.camera_required === 'none') setText(els.guide, phase.label || 'Rest quietly');
+        if (ex.key === 'eye_reset') setText(els.guide, phase.label || 'Rest your eyes');
+        else if (!canUseCamera() || ex.camera_required === 'none') setText(els.guide, phase.label || 'Rest quietly');
         if (elapsed >= Number(ex.duration_sec || 30)) completeCurrentExercise();
     }, 250);
 }
@@ -191,6 +217,7 @@ function focusableInModal() {
 function showSelfReport() {
     clearInterval(state.exerciseTimer); state.exerciseTimer = null;
     state.monitor?.pause();
+    showEyeExerciseSurface(false);
     setPhase('self_report', 'Choose how you feel now.');
     state.lastFocusedBeforeModal = document.activeElement;
     if (els.modal) els.modal.hidden = false;
@@ -303,7 +330,7 @@ function handleVisibilityChange() {
 }
 function bindEvents() {
     document.querySelectorAll('[data-exercise-key]').forEach((node) => {
-        node.addEventListener('click', () => { if (node.disabled) return; state.currentExercise = node.dataset.exerciseKey; updateExerciseUi(); showPicker(false); setPhase('ready', 'Press Start exercise when ready.'); });
+        node.addEventListener('click', () => { if (node.disabled) return; state.currentExercise = node.dataset.exerciseKey; showEyeExerciseSurface(false); updateExerciseUi(); showPicker(false); setPhase('ready', 'Press Start exercise when ready.'); });
         node.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); node.click(); }
         });
@@ -342,9 +369,16 @@ async function init() {
     setPhase('loading', 'Loading break session...');
     startTotalTimer();
     try { await startBackendSession(); } catch (error) { setText(els.guide, 'Break page loaded, but session saving is unavailable.'); }
-    await initCameraAndModel();
+    if (activeExercise().key === 'eye_reset') {
+        state.detectionSkipped = true;
+        updateStatuses();
+        showCameraSurface(false);
+    } else {
+        await initCameraAndModel();
+    }
     updateExerciseUi();
     setPhase('ready', state.detectionSkipped ? 'Camera off. Box Breathing and quiet rest are available.' : 'Ready. Press Start exercise.');
+    if (shouldAutoStartEyeReset()) startExercise();
 }
 
 init();

@@ -12,6 +12,18 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+
+  // Never touch dynamic app routes or future voice/profile APIs. Only static
+  // MediaPipe assets should ever be served from this worker cache.
+  if (url.origin === self.location.origin && (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/profile') ||
+    url.pathname.startsWith('/tasks/') ||
+    url.pathname.includes('/voice')
+  )) {
+    return;
+  }
+
   const isLocalPoseAsset = url.origin === self.location.origin && url.pathname.includes('/static/break_assets/pose_landmarker_lite.task');
   const isMediaPipeAsset = isLocalPoseAsset || (CACHE_HOSTS.has(url.hostname) && (
     url.pathname.includes('/@mediapipe/tasks-vision') ||

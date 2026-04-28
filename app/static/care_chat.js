@@ -6,6 +6,7 @@
         input: 'care-input',
         sendBtn: 'care-send-btn',
         endBtn: 'care-end-btn',
+        micBtn: 'care-mic-btn',
         status: 'care-status-line',
     }, config.elementIds || {});
     const rootEl = config.rootSelector ? document.querySelector(config.rootSelector) : document;
@@ -14,6 +15,7 @@
     const inputEl = document.getElementById(ids.input);
     const sendBtn = document.getElementById(ids.sendBtn);
     const endBtn = document.getElementById(ids.endBtn);
+    const micBtn = document.getElementById(ids.micBtn);
     const statusEl = document.getElementById(ids.status);
     const quickBtns = Array.from((rootEl || document).querySelectorAll(config.quickButtonSelector || '.care-quick-btn'));
 
@@ -25,6 +27,15 @@
     let sending = false;
     let ending = false;
     let typingVisible = false;
+    let recognition = null;
+    let voiceInputActive = false;
+    let voiceFinalText = '';
+    let silenceTimer = null;
+    let maxVoiceTimer = null;
+    let voiceWarningTimer = null;
+    let lastVoiceActivityAt = 0;
+    let voiceHeard = false;
+    let voiceStopReason = 'manual';
 
 
     function browserSupportContext() {
@@ -98,10 +109,174 @@
         }
     }
 
+    function speechRecognitionClass() {
+        return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    }
+
+    function isSecureEnoughForMicrophone() {
+        return window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    }
+
+    function dispatchVoiceInputState(active, reason) {
+        document.dispatchEvent(new CustomEvent('wellhabit:voice-input-state', {
+            detail: { active: Boolean(active), reason: reason || 'manual' }
+        }));
+    }
+
+    function setMicActive(active) {
+        if (!micBtn) return;
+        micBtn.classList.toggle('is-recording', Boolean(active));
+        micBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        micBtn.textContent = active ? '■' : '🎙️';
+        micBtn.title = active ? 'Stop voice input' : 'Voice input';
+    }
+
+    function clearVoiceTimers() {
+        if (silenceTimer) window.clearInterval(silenceTimer);
+        if (maxVoiceTimer) window.clearTimeout(maxVoiceTimer);
+        if (voiceWarningTimer) window.clearTimeout(voiceWarningTimer);
+        silenceTimer = null;
+        maxVoiceTimer = null;
+        voiceWarningTimer = null;
+    }
+
+    function cleanupVoiceInput(reason) {
+        clearVoiceTimers();
+        recognition = null;
+        if (voiceInputActive) {
+            voiceInputActive = false;
+            dispatchVoiceInputState(false, reason || voiceStopReason);
+        }
+        setMicActive(false);
+    }
+
+    function finishVoiceInput(reason) {
+        const finalReason = reason || voiceStopReason || 'manual';
+        cleanupVoiceInput(finalReason);
+        if (finalReason === 'max_duration') {
+            statusEl.textContent = 'Voice input reached 60 seconds and was finalized in the input box. Please review before sending.';
+        } else if (finalReason === 'silence') {
+            statusEl.textContent = 'Voice input stopped after silence. You can edit before sending.';
+        } else if (finalReason === 'visibility') {
+            statusEl.textContent = 'Voice input stopped because the page was hidden.';
+        } else if (finalReason === 'error') {
+            statusEl.textContent = 'Voice input stopped. You can type or try the microphone again.';
+        } else {
+            statusEl.textContent = 'Voice input stopped. You can edit before sending.';
+        }
+    }
+
+    function stopVoiceInput(reason) {
+        voiceStopReason = reason || 'manual';
+        if (!recognition) {
+            finishVoiceInput(voiceStopReason);
+            return;
+        }
+        try {
+            const stoppingRecognition = recognition;
+            recognition.stop();
+            window.setTimeout(() => {
+                if (recognition === stoppingRecognition) finishVoiceInput(voiceStopReason);
+            }, 800);
+        } catch (error) {
+            try { recognition.abort(); } catch (abortError) {}
+            finishVoiceInput(voiceStopReason);
+        }
+    }
+
+    function startVoiceInput() {
+        const Recognition = speechRecognitionClass();
+        if (!micBtn) return;
+        if (voiceInputActive) {
+            stopVoiceInput('manual');
+            return;
+        }
+        if (!Recognition) {
+            statusEl.textContent = 'Voice input is not supported in this browser. Chrome or Edge usually works best.';
+            return;
+        }
+        if (!isSecureEnoughForMicrophone()) {
+            statusEl.textContent = 'Microphone permission requires HTTPS or localhost.';
+            return;
+        }
+        if (sending || ending) return;
+
+        window.WellHabitAudio?.cancelSpeech?.();
+        voiceStopReason = 'manual';
+        voiceFinalText = inputEl.value.trim();
+        lastVoiceActivityAt = Date.now();
+        voiceHeard = false;
+
+        try {
+            recognition = new Recognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = true;
+            recognition.continuous = true;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                voiceInputActive = true;
+                dispatchVoiceInputState(true, 'start');
+                setMicActive(true);
+                statusEl.textContent = 'Listening... speak now. It will stop after 2 seconds of silence or 60 seconds max.';
+            };
+
+            recognition.onresult = (event) => {
+                let interimText = '';
+                for (let index = event.resultIndex; index < event.results.length; index += 1) {
+                    const result = event.results[index];
+                    const transcript = (result?.[0]?.transcript || '').trim();
+                    if (!transcript) continue;
+                    lastVoiceActivityAt = Date.now();
+                    voiceHeard = true;
+                    if (result.isFinal) {
+                        voiceFinalText = `${voiceFinalText} ${transcript}`.trim();
+                    } else {
+                        interimText = `${interimText} ${transcript}`.trim();
+                    }
+                }
+                inputEl.value = `${voiceFinalText}${interimText ? ` ${interimText}` : ''}`.trim();
+                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+
+            recognition.onerror = (event) => {
+                const error = event?.error || 'error';
+                if (error === 'not-allowed' || error === 'service-not-allowed') {
+                    statusEl.textContent = 'Microphone permission was blocked or denied.';
+                } else if (error === 'no-speech') {
+                    statusEl.textContent = 'No speech was detected. You can try again.';
+                } else {
+                    statusEl.textContent = `Voice input error: ${error}.`;
+                }
+                voiceStopReason = 'error';
+                try { recognition.abort(); } catch (abortError) {}
+                finishVoiceInput('error');
+            };
+
+            recognition.onend = () => {
+                finishVoiceInput(voiceStopReason);
+            };
+
+            recognition.start();
+
+            voiceWarningTimer = window.setTimeout(() => {
+                if (voiceInputActive) statusEl.textContent = 'Voice input will stop in 10 seconds. Keep speaking, then review before sending.';
+            }, 50000);
+            maxVoiceTimer = window.setTimeout(() => stopVoiceInput('max_duration'), 60000);
+            silenceTimer = window.setInterval(() => {
+                if (voiceInputActive && voiceHeard && Date.now() - lastVoiceActivityAt >= 2000) stopVoiceInput('silence');
+            }, 300);
+        } catch (error) {
+            statusEl.textContent = 'Voice input could not start.';
+            finishVoiceInput('error');
+        }
+    }
+
     function setBusy(isBusy) {
         sending = isBusy;
         sendBtn.disabled = isBusy;
         endBtn.disabled = isBusy;
+        if (micBtn) micBtn.disabled = isBusy || ending;
         sendBtn.style.opacity = isBusy ? '0.75' : '1';
         endBtn.style.opacity = isBusy ? '0.75' : '1';
     }
@@ -241,10 +416,12 @@
                 await wait(380);
             }
         }
+        window.WellHabitAudio?.speak?.(text);
     }
 
     async function sendMessage(content) {
         if (!content || sending || ending) return;
+        if (voiceInputActive) stopVoiceInput('send');
         pushMessage('user', content, null);
         setBusy(true);
         setTypingVisible(true);
@@ -294,6 +471,8 @@
         const redirectAfter = Boolean(options && options.redirectAfter);
         if (ending) return;
         ending = true;
+        if (voiceInputActive) stopVoiceInput('end_session');
+        window.WellHabitAudio?.cancelSpeech?.();
 
         const payload = JSON.stringify({
             session_id: config.sessionId,
@@ -318,6 +497,8 @@
             }
         }
     }
+
+    micBtn?.addEventListener('click', startVoiceInput);
 
     formEl.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -352,8 +533,17 @@
     });
 
     window.addEventListener('pagehide', () => {
+        if (voiceInputActive) stopVoiceInput('pagehide');
+        window.WellHabitAudio?.cancelSpeech?.();
         if (!ending) {
             endSession({ useBeacon: true });
+        }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') {
+            if (voiceInputActive) stopVoiceInput('visibility');
+            window.WellHabitAudio?.cancelSpeech?.();
         }
     });
 

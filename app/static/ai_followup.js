@@ -47,10 +47,13 @@
         function show(prompt) {
             if (!overlay || !prompt) return;
             activePrompt = prompt;
-            if (taskEl) taskEl.textContent = `Completed task: ${prompt.task_title || 'AI suggestion'}`;
-            if (questionEl) questionEl.textContent = prompt.question || 'After doing this AI suggestion, how much better do you feel out of 10 regarding the negativity detected earlier?';
+            const taskText = `Completed task: ${prompt.task_title || 'AI suggestion'}`;
+            const questionText = prompt.question || 'After doing this AI suggestion, how much better do you feel out of 10 regarding the negativity detected earlier?';
+            if (taskEl) taskEl.textContent = taskText;
+            if (questionEl) questionEl.textContent = questionText;
             renderButtons();
             overlay.hidden = false;
+            window.WellHabitAudio?.speak?.(`${taskText}. ${questionText}`);
         }
 
         laterBtn?.addEventListener('click', hide);
@@ -74,9 +77,12 @@
 
         function show(prompt) {
             if (!overlay || !prompt) return;
-            if (titleEl) titleEl.textContent = prompt.message || `AI suggestion added: ${prompt.task_title || 'New task'}`;
-            if (detailEl) detailEl.textContent = prompt.detail || `Added to today's todo list · source: ${prompt.source_label || 'ai'}`;
+            const titleText = prompt.message || `AI suggestion added: ${prompt.task_title || 'New task'}`;
+            const detailText = prompt.detail || `Added to today's todo list · source: ${prompt.source_label || 'ai'}`;
+            if (titleEl) titleEl.textContent = titleText;
+            if (detailEl) detailEl.textContent = detailText;
             overlay.hidden = false;
+            window.WellHabitAudio?.speak?.(`${titleText}. ${detailText}`);
         }
 
         function showWhenReady(prompt) {

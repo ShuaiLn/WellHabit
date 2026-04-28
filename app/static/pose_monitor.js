@@ -147,7 +147,10 @@ export class PoseMonitor {
     constructor() {
         this.videoEl = null; this.canvasEl = null; this.landmarker = null; this.renderer = null;
         this.rafId = null; this.callbacks = []; this.baseline = null; this.baselineQuality = 'unknown'; this.exerciseKey = 'box_breathing'; this.exerciseData = null;
-        this.startedAt = 0; this.paused = false; this.lastMidpoint = null; this.unstableUntil = 0;
+        this.startedAt = 0; this.paused = false; this.pausedForVoiceInput = false; this.lastMidpoint = null; this.unstableUntil = 0;
+        document.addEventListener('wellhabit:voice-input-state', (event) => {
+            this.setVoiceInputPaused(Boolean(event.detail?.active));
+        });
     }
     init(videoEl, canvasEl, landmarker) {
         this.videoEl = videoEl; this.canvasEl = canvasEl; this.landmarker = landmarker; this.renderer = new PoseRenderer(canvasEl, videoEl);
@@ -199,6 +202,16 @@ export class PoseMonitor {
     onEvaluation(callback) { if (typeof callback === 'function') this.callbacks.push(callback); }
     pause() { this.paused = true; if (this.rafId) cancelAnimationFrame(this.rafId); this.rafId = null; }
     resume() { if (!this.paused && this.rafId) return; this.paused = false; this.loop(); }
+    setVoiceInputPaused(paused) {
+        this.pausedForVoiceInput = Boolean(paused);
+        if (this.pausedForVoiceInput) {
+            if (this.rafId) cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+            this.callbacks.forEach((cb) => cb(this.pausedEvaluation('Voice input active', 'voice_input', (nowMs() - this.startedAt) / 1000)));
+            return;
+        }
+        if (!this.paused) this.loop();
+    }
     stop() { if (this.rafId) cancelAnimationFrame(this.rafId); this.rafId = null; }
     detect() {
         if (!this.landmarker || !this.videoEl || this.videoEl.readyState < 2) return null;
@@ -270,10 +283,10 @@ export class PoseMonitor {
         return { score, phase, hints, metrics, elapsed, paused: false, pauseReason: '' };
     }
     loop() {
-        if (this.rafId || this.paused) return;
+        if (this.rafId || this.paused || this.pausedForVoiceInput) return;
         const tick = () => {
             this.rafId = null;
-            if (this.paused) return;
+            if (this.paused || this.pausedForVoiceInput) return;
             const landmarks = this.detect();
             const evaluation = this.evaluate(landmarks);
             this.renderer?.render(this.exerciseKey, landmarks, this.baseline, evaluation);

@@ -43,6 +43,12 @@ class User(UserMixin, db.Model):
     wellness_updated_at = db.Column(db.DateTime)
     last_task_rollover_on = db.Column(db.Date)
     last_activity_pruned_at = db.Column(db.DateTime)
+    tts_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    tts_rate = db.Column(db.Float, nullable=False, default=1.0)
+    tts_voice_uri = db.Column(db.String(255))
+    tts_voice_name = db.Column(db.String(160))
+    tts_voice_lang = db.Column(db.String(20), nullable=False, default='en-US')
+    tts_voice_preference = db.Column(db.String(20), nullable=False, default='default')
 
     daily_logs = db.relationship('DailyLog', backref='user', lazy='selectin', cascade='all, delete-orphan')
     tasks = db.relationship('Task', backref='user', lazy='selectin', cascade='all, delete-orphan')

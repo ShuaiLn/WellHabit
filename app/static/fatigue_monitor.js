@@ -156,6 +156,7 @@
             this.lastReportByType = Object.create(null);
             this.lastFatigueBand = 'normal';
             this.pausedForVisibility = false;
+            this.pausedForVoiceInput = false;
             this.emaScore = 0;
             this.yawnCandidate = null;
             this.userOptedIn = false;
@@ -199,11 +200,15 @@
                 this.setVideoTracksEnabled(true);
             });
             document.addEventListener('wellhabit:timer-state', (event) => this.handleTimerState(event.detail));
+            document.addEventListener('wellhabit:voice-input-state', (event) => {
+                this.setVoiceInputPaused(Boolean(event.detail?.active));
+            });
         }
 
         handleTimerState(state) {
+            if (!this.stream) return;
             if (!state || state.mode !== 'focus' || !state.isRunning) {
-                if (this.stream) this.stop(state?.mode === 'break' ? 'Break mode. Camera released.' : 'Timer paused. Camera released.');
+                this.setStatus('Camera preview is still on. Use Turn off to release it.');
             }
         }
 
@@ -226,6 +231,18 @@
                 this.lastSampleAt = 0;
                 this.setStatus('Tab visible again. Camera fatigue monitor resumed.');
             }
+        }
+
+        setVoiceInputPaused(paused) {
+            this.pausedForVoiceInput = Boolean(paused);
+            if (!this.stream) return;
+            if (this.pausedForVoiceInput) {
+                this.hideBreakModal();
+                this.setStatus('Voice input is active. Fatigue analysis is temporarily paused to save CPU/GPU.');
+                return;
+            }
+            this.lastSampleAt = 0;
+            this.setStatus('Voice input ended. Camera fatigue monitor resumed.');
         }
 
         setStatus(text) {
@@ -314,7 +331,8 @@
                 await this.loadModel();
             } catch (error) {
                 console.warn('Fatigue model load failed:', error);
-                this.stop(this.modelErrorMessage(error));
+                this.faceLandmarker = null;
+                this.setStatus(`${this.modelErrorMessage(error)} Camera preview stays on, but AI fatigue analysis is unavailable.`);
                 return;
             }
 
@@ -340,6 +358,7 @@
                 this.stream = null;
             }
             this.pausedForVisibility = false;
+            this.pausedForVoiceInput = false;
             if (this.video) this.video.srcObject = null;
             this.setCameraRunning(false);
             this.hideBreakModal();
@@ -428,7 +447,7 @@
         loop() {
             this.rafId = window.requestAnimationFrame((now) => {
                 if (!this.stream || !this.faceLandmarker) return;
-                if (this.pausedForVisibility) {
+                if (this.pausedForVisibility || this.pausedForVoiceInput) {
                     this.loop();
                     return;
                 }

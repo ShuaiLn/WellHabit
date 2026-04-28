@@ -244,6 +244,16 @@ def run_lightweight_migrations(app: Flask) -> None:
             _ensure_column(cursor, 'user', 'wellness_updated_at', 'wellness_updated_at DATETIME')
             _ensure_column(cursor, 'user', 'last_task_rollover_on', 'last_task_rollover_on DATE')
             _ensure_column(cursor, 'user', 'last_activity_pruned_at', 'last_activity_pruned_at DATETIME')
+            _ensure_column(cursor, 'user', 'tts_enabled', 'tts_enabled BOOLEAN NOT NULL DEFAULT 0')
+            _ensure_column(cursor, 'user', 'tts_rate', 'tts_rate FLOAT NOT NULL DEFAULT 1.0')
+            _ensure_column(cursor, 'user', 'tts_voice_uri', 'tts_voice_uri VARCHAR(255)')
+            _ensure_column(cursor, 'user', 'tts_voice_name', 'tts_voice_name VARCHAR(160)')
+            _ensure_column(cursor, 'user', 'tts_voice_lang', "tts_voice_lang VARCHAR(20) NOT NULL DEFAULT 'en-US'")
+            _ensure_column(cursor, 'user', 'tts_voice_preference', "tts_voice_preference VARCHAR(20) NOT NULL DEFAULT 'default'")
+            cursor.execute('UPDATE user SET tts_enabled = 0 WHERE tts_enabled IS NULL')
+            cursor.execute('UPDATE user SET tts_rate = 1.0 WHERE tts_rate IS NULL')
+            cursor.execute("UPDATE user SET tts_voice_lang = 'en-US' WHERE tts_voice_lang IS NULL OR tts_voice_lang = ''")
+            cursor.execute("UPDATE user SET tts_voice_preference = 'default' WHERE tts_voice_preference IS NULL OR tts_voice_preference = ''")
 
         if 'daily_log' in tables:
             _ensure_column(cursor, 'daily_log', 'journal_text', 'journal_text TEXT')

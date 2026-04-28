@@ -100,6 +100,10 @@
     }
 
     function playTimerBeep() {
+        if (window.WellHabitAudio?.playPromptBeep) {
+            window.WellHabitAudio.playPromptBeep();
+            return;
+        }
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             if (!AudioContextClass) return;

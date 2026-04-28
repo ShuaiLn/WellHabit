@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Guided Break | WellHabit{% endblock %}
 {% block content %}
-<section class="break-shell" id="break-app" data-reason="{{ reason }}" data-default-exercise="{{ default_exercise_key }}" data-suggested-duration="{{ suggested_duration_sec }}" data-start-url="{{ url_for('main.break_start') }}" data-finish-url="{{ url_for('main.break_finish') }}">
+<section class="break-shell" id="break-app" data-reason="{{ reason }}" data-default-exercise="{{ default_exercise_key }}" data-suggested-duration="{{ suggested_duration_sec }}" data-start-url="{{ url_for('main.break_start') }}" data-finish-url="{{ url_for('main.break_finish') }}" data-eye-embed-url="{{ eye_exercise_embed_url }}">
     <header class="break-topbar card card--compact">
         <div>
             <p class="eyebrow">Guided break · {{ reason|title }}</p>
@@ -65,6 +65,7 @@
             <div class="break-stage" id="break-stage">
                 <video id="break-video" autoplay muted playsinline hidden aria-hidden="true"></video>
                 <canvas id="break-canvas" hidden aria-hidden="true"></canvas>
+                <iframe id="break-eye-iframe" class="break-eye-iframe" src="" title="Eye exercise video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen hidden></iframe>
                 <div class="breathing-orb" id="breathing-orb" hidden aria-hidden="true"><span></span></div>
                 <div class="alignment-score-badge" id="alignment-score-badge" hidden>Score --</div>
                 <div class="break-camera-placeholder" id="break-placeholder">
@@ -134,7 +135,8 @@ window.WELLHABIT_BREAK = {
     suggestedDurationSec: {{ suggested_duration_sec|tojson }},
     startUrl: {{ url_for('main.break_start')|tojson }},
     finishUrl: {{ url_for('main.break_finish')|tojson }},
-    dashboardUrl: {{ url_for('main.dashboard')|tojson }}
+    dashboardUrl: {{ url_for('main.dashboard')|tojson }},
+    eyeExerciseEmbedUrl: {{ eye_exercise_embed_url|tojson }}
 };
 </script>
 {% endblock %}
