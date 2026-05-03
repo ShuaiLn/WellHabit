@@ -42,3 +42,8 @@
     {% endif %}
 </section>
 {% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
+{% endblock %}

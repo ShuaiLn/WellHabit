@@ -6,8 +6,8 @@
     <p class="dashboard-status-line">{{ nav_local_date.split(',')[0] if ',' in nav_local_date else nav_local_date }} · {{ today_focus_count }} focus rounds, {{ today_log.water_ml if today_log else 0 }} ml water</p>
 
     <div class="dashboard-main-column">
-        <article class="card card--compact" id="primary-action-shell" data-water="{{ today_log.water_ml if today_log else 0 }}" data-water-goal="{{ current_user.daily_water_goal_ml or 0 }}" data-due-hydration="{{ '1' if due_hydration_prompt and due_hydration_prompt.id else '0' }}">
-            <div class="primary-action-head pattern-home-head">
+        <article class="card card--compact focus-clock-card" id="primary-action-shell" data-session-state="idle" data-water="{{ today_log.water_ml if today_log else 0 }}" data-water-goal="{{ current_user.daily_water_goal_ml or 0 }}" data-due-hydration="{{ '1' if due_hydration_prompt and due_hydration_prompt.id else '0' }}">
+            <div class="primary-action-head pattern-home-head focus-idle-only">
                 <p class="eyebrow">Focus Clock</p>
                 {% if active_pattern_cards %}
                     {% set top_pattern = active_pattern_cards[0] %}
@@ -35,9 +35,19 @@
             </div>
 
             <div class="primary-action-panel is-active" id="primary-panel-focus">
-                <div class="timer-shell">
+                <div class="timer-shell focus-timer-shell">
+                    <div class="focus-camera-stage focus-cam-only" id="focus-camera-stage">
+                        <video id="focus-camera-video" autoplay muted playsinline hidden></video>
+                        <div class="camera-preview-placeholder" id="focus-camera-placeholder">
+                            <strong>Camera is off</strong>
+                            <span>Start the timer without camera, or enable camera only when you want local fatigue support.</span>
+                        </div>
+                        <div class="fatigue-toast" id="fatigue-toast" hidden></div>
+                    </div>
+
                     <div class="timer-display" id="timer-display">{{ "%02d:00"|format(app_ui_defaults.focus_minutes) }}</div>
-                    <form class="timer-settings" id="pomodoro-form">
+
+                    <form class="timer-settings focus-idle-only" id="pomodoro-form">
                         <label>Focus (minutes)
                             <input type="number" id="focus-minutes" value="{{ app_ui_defaults.focus_minutes }}" min="1" max="120">
                         </label>
@@ -48,12 +58,46 @@
                             <input type="text" id="pomodoro-activity" value="{{ app_ui_defaults.activity_label }}" placeholder="{{ app_ui_defaults.activity_label }}">
                         </label>
                     </form>
-                    <div class="primary-action-actions">
+
+                    <div class="primary-action-actions focus-idle-actions focus-idle-only">
                         <button class="btn btn-primary" id="start-btn" type="button">Start</button>
-                        <button class="btn btn-secondary" id="pause-btn" type="button">Pause</button>
-                        <button class="btn btn-ghost" id="reset-btn" type="button">Reset</button>
+                        <button class="link-btn focus-camera-link" type="button" id="camera-start-btn">Enable camera <span class="muted">(optional)</span></button>
                     </div>
-                    <div class="water-progress-row">
+
+                    <div class="fatigue-monitor-panel focus-cam-only" id="fatigue-monitor-panel" data-report-url="{{ url_for('main.pomodoro_fatigue_signal') }}" data-loader-url="{{ url_for('static', filename='vision_loader.js') }}" data-module-url="{{ url_for('static', filename='vendor/mediapipe/vision_bundle.mjs') }}" data-wasm-url="{{ url_for('static', filename='vendor/mediapipe/wasm') }}" data-model-url="{{ url_for('static', filename='break_assets/face_landmarker.task') }}">
+                        <div class="fatigue-status-row" id="fatigue-status-row" data-band="idle">
+                            <span class="fatigue-status-dot" aria-hidden="true"></span>
+                            <div>
+                                <strong id="fatigue-status-label">Camera off</strong>
+                                <span id="fatigue-status-copy">Enable camera only if you want focus support.</span>
+                            </div>
+                        </div>
+                        <details class="fatigue-details" id="fatigue-details">
+                            <summary>Show signal details</summary>
+                            <div class="fatigue-detail-score" aria-label="Composite fatigue score">
+                                <span>Composite score</span>
+                                <strong id="fatigue-score-text">0%</strong>
+                            </div>
+                            <div class="progress-track fatigue-score-track"><div class="progress-fill fatigue-score-fill" id="fatigue-score-bar" style="width: 0%;"></div></div>
+                            <div class="fatigue-metric-grid" aria-label="Fatigue signal details">
+                                <span id="fatigue-metric-perclos" title="How much of the recent window looked like eye closure."><strong>Eye closure</strong><em>--</em></span>
+                                <span id="fatigue-metric-blink" title="Blink events per minute compared with a normal working range."><strong>Blink rate</strong><em>--</em></span>
+                                <span id="fatigue-metric-yawn" title="Long mouth-open events detected in the recent window."><strong>Yawns</strong><em>--</em></span>
+                                <span id="fatigue-metric-head" title="Head angle and nodding compared with your calibrated neutral posture."><strong>Head posture</strong><em>--</em></span>
+                                <span id="fatigue-metric-gaze" title="A weak webcam-only estimate of whether attention seems on screen."><strong>Gaze</strong><em>--</em></span>
+                                <span id="fatigue-metric-fps" title="Shows camera capture settings and face inference speed. Low analysis FPS uses best-effort estimates instead of pausing."><strong>Performance</strong><em>--</em></span>
+                            </div>
+                        </details>
+                    </div>
+
+                    <div class="primary-action-actions focus-running-actions">
+                        <button class="btn btn-secondary" id="pause-btn" type="button">Pause</button>
+                        <button class="btn btn-secondary btn-sm focus-running-camera-start" id="camera-start-running-btn" type="button">Enable camera</button>
+                        <button class="btn btn-ghost" id="reset-btn" type="button">Stop</button>
+                        <button class="btn btn-ghost btn-sm focus-cam-only" type="button" id="camera-stop-btn" hidden>Turn off camera</button>
+                    </div>
+
+                    <div class="water-progress-row focus-idle-only">
                         <div class="water-progress-copy">
                             <span class="eyebrow">Today's water</span>
                             <strong>{{ today_log.water_ml if today_log else 0 }} / {{ current_user.daily_water_goal_ml or 0 }} ml</strong>
@@ -65,50 +109,11 @@
                         <button class="btn btn-secondary btn-sm" type="button" id="primary-hydration-btn">Log water</button>
                         {% endif %}
                     </div>
-                    <div class="progress-track water-progress-track"><div class="progress-fill metric-hydration" style="width: {{ [100, ((((today_log.water_ml if today_log else 0) / ((current_user.daily_water_goal_ml or 1))) * 100)|round(0, 'floor'))]|min if (current_user.daily_water_goal_ml or 0) > 0 else 0 }}%;"></div></div>
+                    <div class="progress-track water-progress-track focus-idle-only"><div class="progress-fill metric-hydration" style="width: {{ [100, ((((today_log.water_ml if today_log else 0) / ((current_user.daily_water_goal_ml or 1))) * 100)|round(0, 'floor'))]|min if (current_user.daily_water_goal_ml or 0) > 0 else 0 }}%;"></div></div>
                     <p class="muted small" id="timer-message">When a focus round ends, it will be saved automatically.</p>
+                    <p class="muted small focus-cam-only" id="camera-status-line">Camera is opt-in. Frames are analyzed locally when possible and are not stored.</p>
                 </div>
             </div>
-        </article>
-
-        <article class="card card--compact camera-preview-card" id="camera-preview-card">
-            <div class="home-card-topline">
-                <div>
-                    <p class="eyebrow">Optional camera</p>
-                    <h2>Pomodoro fatigue signals</h2>
-                </div>
-                <span class="soft-badge">Weak signal only</span>
-            </div>
-            <div class="camera-preview-box">
-                <video id="focus-camera-video" autoplay muted playsinline hidden></video>
-                <div class="camera-preview-placeholder" id="focus-camera-placeholder">
-                    <strong>Camera is off</strong>
-                    <span>Starts from the Pomodoro Start button or manual opt-in. Frames are analyzed locally when possible and are not stored.</span>
-                </div>
-                <div class="fatigue-toast" id="fatigue-toast" hidden></div>
-            </div>
-            <div class="fatigue-monitor-panel" id="fatigue-monitor-panel" data-report-url="{{ url_for('main.pomodoro_fatigue_signal') }}" data-model-url="{{ url_for('static', filename='break_assets/face_landmarker.task') }}">
-                <div class="fatigue-score-row">
-                    <div>
-                        <p class="eyebrow">Possible fatigue score</p>
-                        <strong id="fatigue-score-text">0%</strong>
-                    </div>
-                    <span class="soft-badge">Behavioral trend, not diagnosis</span>
-                </div>
-                <div class="progress-track fatigue-score-track"><div class="progress-fill fatigue-score-fill" id="fatigue-score-bar" style="width: 0%;"></div></div>
-                <div class="fatigue-metric-grid" aria-label="Fatigue signal metrics">
-                    <span id="fatigue-metric-perclos">PERCLOS: --</span>
-                    <span id="fatigue-metric-blink">Blink: --</span>
-                    <span id="fatigue-metric-yawn">Yawns: --</span>
-                    <span id="fatigue-metric-head">Head: --</span>
-                    <span id="fatigue-metric-gaze">Gaze: --</span>
-                </div>
-            </div>
-            <div class="primary-action-actions">
-                <button class="btn btn-secondary btn-sm" type="button" id="camera-start-btn">Enable fatigue monitor</button>
-                <button class="btn btn-ghost btn-sm" type="button" id="camera-stop-btn" hidden>Turn off</button>
-            </div>
-            <p class="muted small" id="camera-status-line">Camera uses permission-based opt-in. It requires HTTPS or localhost.</p>
         </article>
 
         <article class="card card--compact">
@@ -125,11 +130,26 @@
                     {% for entry in recent_activity_entries %}
                         {% set minutes = (entry.event_at.hour * 60) + entry.event_at.minute %}
                         {% set left = ((minutes / 1440) * 100)|round(1) %}
-                        <span class="timeline-marker" style="left: {{ left }}%;"></span>
-                        <div class="timeline-label" style="left: {{ left }}%;">
-                            <strong>{{ entry.title }}</strong>
-                            <span>{{ entry.event_at.strftime('%H:%M') }}</span>
-                        </div>
+                        {% set edge_class = ' timeline-marker--start' if left < 8 else ' timeline-marker--end' if left > 92 else '' %}
+                        <button
+                            class="timeline-marker{{ edge_class }}"
+                            style="left: {{ left }}%;"
+                            type="button"
+                            aria-label="{% if entry.timeline_count > 1 %}{{ entry.timeline_count }} events around {{ entry.timeline_time_label }}{% else %}{{ entry.title }} at {{ entry.timeline_time_label }}{% endif %}"
+                        >
+                            <span class="timeline-dot" aria-hidden="true"></span>
+                            <span class="timeline-tooltip" aria-hidden="true">
+                                <strong>{{ entry.title }}</strong>
+                                <span>{{ entry.timeline_time_label }}</span>
+                                {% if entry.timeline_count > 1 %}
+                                    <span class="timeline-tooltip-items">
+                                        {% for item in entry.timeline_items %}
+                                            <span>{{ item.event_at.strftime('%H:%M') }} · {{ item.title }}</span>
+                                        {% endfor %}
+                                    </span>
+                                {% endif %}
+                            </span>
+                        </button>
                     {% endfor %}
                 </div>
                 <div class="timeline-scale">
@@ -159,7 +179,9 @@
                 <a href="{{ url_for('main.calendar_view') }}" class="link-btn">Open calendar</a>
             </div>
 
+
             <form method="post" action="{{ url_for('tasks.add_task') }}" class="inline-form todo-inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="task_date" value="{{ today.isoformat() }}">
                 <input type="text" name="title" placeholder="Add a task" required>
                 <button class="btn btn-secondary" type="submit">Add</button>
@@ -171,6 +193,7 @@
                         <div class="todo-item draggable-todo {% if task.completed %}done{% endif %}" data-task-id="{{ task.id }}" data-task-type="{{ task.task_type or 'regular' }}" data-edit-url="{{ url_for('tasks.edit_task', task_id=task.id) }}" data-meal-url="{{ url_for('tasks.update_meal_task', task_id=task.id) }}" draggable="true">
                             <button class="drag-handle" type="button" aria-label="Drag to reorder">⋮⋮</button>
                             <form method="post" action="{{ url_for('tasks.toggle_task', task_id=task.id) }}" class="todo-check-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <label class="todo-check-label">
                                     <input type="checkbox" {% if task.completed %}checked{% endif %} {% if (task.task_type or 'regular') == 'meal' %}data-meal-toggle="1"{% else %}data-autosubmit="1"{% endif %}>
                                     <span>
@@ -183,6 +206,7 @@
                                 </label>
                             </form>
                             <form method="post" action="{{ url_for('tasks.delete_task', task_id=task.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
                             </form>
                         </div>
@@ -201,6 +225,19 @@
 
 {% include '_pattern_modal.html' %}
 
+
+<div class="habit-modal-overlay" id="camera-consent-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="camera-consent-title">
+        <p class="eyebrow">Optional camera</p>
+        <h2 id="camera-consent-title">Enable camera fatigue support?</h2>
+        <p class="muted">This is an opt-in behavioral trend signal, not a diagnosis or medical advice. Camera frames are used for live focus support and are not stored by WellHabit.</p>
+        <div class="modal-actions">
+            <button class="btn btn-primary" type="button" id="camera-consent-allow">Enable camera</button>
+            <button class="btn btn-secondary" type="button" id="camera-consent-cancel">Not now</button>
+        </div>
+    </div>
+</div>
+
 <div class="habit-modal-overlay" id="fatigue-break-overlay" hidden>
     <div class="modal fatigue-break-modal" role="dialog" aria-modal="true" aria-labelledby="fatigue-break-title">
         <p class="eyebrow">Possible fatigue signal</p>
@@ -209,6 +246,21 @@
         <div class="modal-actions">
             <button class="btn btn-primary" type="button" id="fatigue-rest-btn">Start break</button>
             <button class="btn btn-secondary" type="button" id="fatigue-keep-btn">Keep focusing</button>
+        </div>
+    </div>
+</div>
+
+
+<div class="habit-modal-overlay" id="affect-confirm-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="affect-confirm-title">
+        <p class="eyebrow">Multimodal check-in</p>
+        <h2 id="affect-confirm-title">You seem a bit more relaxed. Did that help?</h2>
+        <p class="muted">This is not based on your face alone. WellHabit only asks after the camera signal lines up with another recent action, and your answer is the final source of truth.</p>
+        <p class="muted small" id="affect-confirm-status" aria-live="polite"></p>
+        <div class="modal-actions">
+            <button class="btn btn-primary" type="button" id="affect-confirm-yes">Yes</button>
+            <button class="btn btn-secondary" type="button" id="affect-confirm-no">No</button>
+            <button class="btn btn-ghost" type="button" id="affect-confirm-unsure">Not sure</button>
         </div>
     </div>
 </div>
@@ -256,7 +308,6 @@ window.WELLHABIT_CARE = {
         input: 'home-care-input',
         sendBtn: 'home-care-send-btn',
         endBtn: 'home-care-end-btn',
-        micBtn: 'home-care-mic-btn',
         status: 'home-care-status-line'
     },
     quickButtonSelector: '#right-panel-care .care-quick-btn'
@@ -349,11 +400,28 @@ if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && windo
     });
 })();
 
+const primaryActionShell = document.getElementById('primary-action-shell');
 const timerDisplay = document.getElementById('timer-display');
 const timerMessage = document.getElementById('timer-message');
 const focusInput = document.getElementById('focus-minutes');
 const breakInput = document.getElementById('break-minutes');
 const activityInput = document.getElementById('pomodoro-activity');
+let lastTimerState = null;
+let focusCameraActive = false;
+
+function syncFocusCardState(state = lastTimerState) {
+    if (!primaryActionShell) return;
+    const running = Boolean(state && state.isRunning);
+    if (!running) {
+        primaryActionShell.dataset.sessionState = 'idle';
+        return;
+    }
+    if (state.mode === 'break') {
+        primaryActionShell.dataset.sessionState = 'running-break';
+        return;
+    }
+    primaryActionShell.dataset.sessionState = focusCameraActive ? 'running-cam' : 'running-no-cam';
+}
 
 function getTimerManager() {
     return window.WellHabitTimer;
@@ -370,12 +438,14 @@ function currentTimerConfig() {
 function renderTimerState(state) {
     const timerManager = getTimerManager();
     if (!timerManager || !state || !timerDisplay || !timerMessage) return;
+    lastTimerState = state;
     const remainingSeconds = timerManager.getRemainingSeconds(state);
     timerDisplay.textContent = timerManager.formatSeconds(remainingSeconds);
     timerMessage.textContent = state.lastMessage || 'When a focus round ends, it will be saved automatically.';
     if (focusInput && document.activeElement !== focusInput) focusInput.value = state.focusMinutes;
     if (breakInput && document.activeElement !== breakInput) breakInput.value = state.breakMinutes;
     if (activityInput && document.activeElement !== activityInput) activityInput.value = state.activityLabel || 'work';
+    syncFocusCardState(state);
 }
 
 function initDashboardTimer() {
@@ -394,19 +464,48 @@ if (document.readyState === 'loading') {
     initDashboardTimer();
 }
 
-document.getElementById('start-btn')?.addEventListener('click', () => {
-    getTimerManager()?.start(currentTimerConfig());
-    window.WellHabitFatigueMonitor?.startFromUserGesture?.();
+document.addEventListener('wellhabit:fatigue-camera-state', (event) => {
+    focusCameraActive = Boolean(event.detail?.active);
+    syncFocusCardState();
+});
+
+async function startFocusCameraFromButton() {
+    const monitor = window.WellHabitFatigueMonitor;
+    if (!monitor?.startFromUserGesture) return;
+    focusCameraActive = Boolean(await monitor.startFromUserGesture({ auto: false }));
+    syncFocusCardState(lastTimerState);
+}
+
+document.getElementById('camera-start-running-btn')?.addEventListener('click', startFocusCameraFromButton);
+
+document.getElementById('start-btn')?.addEventListener('click', async () => {
+    const timerState = await getTimerManager()?.start(currentTimerConfig());
+    if (timerState) lastTimerState = timerState;
+    syncFocusCardState(timerState || lastTimerState);
+    const monitor = window.WellHabitFatigueMonitor;
+    if (monitor?.shouldAutoStartCamera && await monitor.shouldAutoStartCamera()) {
+        focusCameraActive = Boolean(await monitor.startFromUserGesture?.({ auto: true }));
+        syncFocusCardState(timerState || lastTimerState);
+    }
 });
 
 document.getElementById('pause-btn')?.addEventListener('click', () => {
-    getTimerManager()?.pause();
-    window.WellHabitFatigueMonitor?.stop?.('Timer paused. Camera released.');
+    const timerState = getTimerManager()?.pause();
+    if (timerState) lastTimerState = timerState;
+    const monitor = window.WellHabitFatigueMonitor;
+    if (monitor?.pause) {
+        monitor.pause('Timer paused. Camera stays ready; analysis will resume with the timer.');
+        focusCameraActive = Boolean(monitor.isCameraRunning?.());
+    }
+    syncFocusCardState(timerState || lastTimerState);
 });
 
 document.getElementById('reset-btn')?.addEventListener('click', () => {
-    getTimerManager()?.reset(currentTimerConfig());
-    window.WellHabitFatigueMonitor?.stop?.('Timer reset. Camera released.');
+    const timerState = getTimerManager()?.reset(currentTimerConfig());
+    if (timerState) lastTimerState = timerState;
+    window.WellHabitFatigueMonitor?.stop?.('Timer stopped. Camera released.');
+    focusCameraActive = false;
+    syncFocusCardState(timerState || lastTimerState);
 });
 
 focusInput?.addEventListener('change', () => getTimerManager()?.reset(currentTimerConfig()));
@@ -543,6 +642,20 @@ if (todoListEl) {
     window.WellHabitFatigueCooldownUntil = ts;
 })();
 </script>
+
+<script nonce="{{ csp_nonce }}">
+window.WellHabitAffectConfirm = {
+    confirmUrl: {{ url_for('main.affect_confirm')|tojson }}
+};
+</script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pomodoro_timer.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='timer_widget.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='hydration.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='affect_confirm.js') }}" defer></script>
 <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='fatigue_monitor.js') }}" defer></script>
 <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='care_chat.js') }}" defer></script>
 {% endblock %}

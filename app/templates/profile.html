@@ -15,7 +15,6 @@
             {% if profile_locked %}
             <button class="tab-button" type="button" data-tab="goals">Goals</button>
             <button class="tab-button" type="button" data-tab="schedule">Schedule</button>
-            <button class="tab-button" type="button" data-tab="voice">Voice</button>
             <button class="tab-button" type="button" data-tab="patterns">Patterns</button>
             {% endif %}
         </div>
@@ -219,6 +218,7 @@
                     <p class="eyebrow">Edit</p>
                     <h2>Reminder times</h2>
                     <form method="post" class="form-grid two-columns">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="action" value="update_hydration_schedule">
                         {% for row in hydration_schedule_rows %}
                             <label>
@@ -233,58 +233,6 @@
         </div>
     </section>
 
-
-    <section class="tab-panel" id="tab-voice">
-        <div class="profile-grid">
-            <div class="profile-column">
-                <article class="card">
-                    <p class="eyebrow">Voice</p>
-                    <h2>AI read aloud</h2>
-                    <p class="muted">Uses the browser's built-in SpeechSynthesis. Saved voices fall back across devices by URI, then name, then language/preference.</p>
-                    <form method="post" class="form-grid two-columns" id="voice-settings-form">
-                        <input type="hidden" name="action" value="update_voice_settings">
-                        <label class="checkbox-row full-width">
-                            <input type="checkbox" name="tts_enabled" value="1" {% if current_user.tts_enabled %}checked{% endif %}>
-                            <span>Read Care AI messages aloud</span>
-                        </label>
-                        <label>Speaking speed
-                            <input type="number" name="tts_rate" id="tts-rate-input" min="0.5" max="1.5" step="0.05" value="{{ current_user.tts_rate or 1.0 }}">
-                            <span class="muted small">Natural range: 0.90–1.10. Wider range is allowed for accessibility.</span>
-                        </label>
-                        <label>Voice preference
-                            <select name="tts_voice_preference" id="tts-preference-select">
-                                <option value="default" {% if current_user.tts_voice_preference in [None, '', 'default'] %}selected{% endif %}>System default</option>
-                                <option value="female" {% if current_user.tts_voice_preference == 'female' %}selected{% endif %}>Prefer female-sounding voice</option>
-                                <option value="male" {% if current_user.tts_voice_preference == 'male' %}selected{% endif %}>Prefer male-sounding voice</option>
-                            </select>
-                        </label>
-                        <label class="full-width">English voice
-                            <select name="tts_voice_uri" id="tts-voice-select"
-                                    data-current-uri="{{ current_user.tts_voice_uri or '' }}"
-                                    data-current-name="{{ current_user.tts_voice_name or '' }}"
-                                    data-current-lang="{{ current_user.tts_voice_lang or 'en-US' }}">
-                                <option value="">Loading browser voices...</option>
-                            </select>
-                        </label>
-                        <input type="hidden" name="tts_voice_name" id="tts-voice-name-input" value="{{ current_user.tts_voice_name or '' }}">
-                        <input type="hidden" name="tts_voice_lang" id="tts-voice-lang-input" value="{{ current_user.tts_voice_lang or 'en-US' }}">
-                        <div class="voice-actions full-width">
-                            <button class="btn btn-secondary" type="button" id="tts-preview-btn">Preview voice</button>
-                            <button class="btn btn-primary" type="submit">Save voice settings</button>
-                        </div>
-                    </form>
-                </article>
-            </div>
-            <div class="profile-column">
-                <article class="card">
-                    <p class="eyebrow">Privacy</p>
-                    <h2>What is processed?</h2>
-                    <p class="muted">Read aloud uses local browser voices when available. Care AI voice input uses the browser Web Speech API; depending on the browser, recognition may be processed by the browser vendor's speech service.</p>
-                    <p class="muted small">Voice input is not saved as an audio file by this Flask app.</p>
-                </article>
-            </div>
-        </div>
-    </section>
 
     <section class="tab-panel" id="tab-patterns">
         <div class="profile-grid">
@@ -356,6 +304,8 @@
             </div>
         </div>
     </section>
+
+
     {% else %}
     <section class="tab-panel is-active" id="tab-basic">
         <article class="card narrow">
@@ -363,6 +313,7 @@
             <h2>Set up Basic to unlock the rest</h2>
             <p class="muted">Step 1 of 3 · Fill your basic information to unlock Goals and Schedule.</p>
             <form method="post" class="form-grid two-columns">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label>Age
                     <input type="number" name="age" min="1" value="{{ current_user.age or '' }}" placeholder="17">
                 </label>
@@ -384,6 +335,7 @@
             </form>
         </article>
     </section>
+
     {% endif %}
 </section>
 {% if profile_locked %}
@@ -399,7 +351,6 @@
         basic: document.getElementById('tab-basic'),
         goals: document.getElementById('tab-goals'),
         schedule: document.getElementById('tab-schedule'),
-        voice: document.getElementById('tab-voice'),
         patterns: document.getElementById('tab-patterns'),
     };
     function activate(tab) {
@@ -407,7 +358,8 @@
         Object.entries(panels).forEach(([key, panel]) => panel?.classList.toggle('is-active', key === tab));
     }
     buttons.forEach((button) => button.addEventListener('click', () => activate(button.dataset.tab)));
-    activate('basic');
+    const initialTab = {{ profile_initial_tab|default('basic')|tojson }};
+    activate(panels[initialTab] ? initialTab : 'basic');
 
     document.querySelectorAll('[data-progress-target]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -419,90 +371,6 @@
         });
     });
 
-
-    const voiceSelect = document.getElementById('tts-voice-select');
-    const voiceNameInput = document.getElementById('tts-voice-name-input');
-    const voiceLangInput = document.getElementById('tts-voice-lang-input');
-    const rateInput = document.getElementById('tts-rate-input');
-    const preferenceSelect = document.getElementById('tts-preference-select');
-    const previewBtn = document.getElementById('tts-preview-btn');
-
-    function selectedVoicePayload() {
-        const option = voiceSelect?.selectedOptions?.[0];
-        return {
-            enabled: true,
-            rate: Number(rateInput?.value || 1),
-            voice_uri: voiceSelect?.value || '',
-            voice_name: option?.dataset?.name || voiceNameInput?.value || '',
-            voice_lang: option?.dataset?.lang || voiceLangInput?.value || 'en-US',
-            voice_preference: preferenceSelect?.value || 'default',
-        };
-    }
-
-    function syncVoiceHiddenInputs() {
-        const option = voiceSelect?.selectedOptions?.[0];
-        if (voiceNameInput) voiceNameInput.value = option?.dataset?.name || '';
-        if (voiceLangInput) voiceLangInput.value = option?.dataset?.lang || 'en-US';
-    }
-
-    function populateVoiceSelect() {
-        if (!voiceSelect || !window.WellHabitAudio) return;
-        const currentUri = voiceSelect.dataset.currentUri || '';
-        const currentName = voiceSelect.dataset.currentName || '';
-        const currentLang = voiceSelect.dataset.currentLang || 'en-US';
-        const allVoices = window.WellHabitAudio.getVoices();
-        const englishVoices = allVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('en'));
-        const voices = englishVoices.length ? englishVoices : allVoices;
-        voiceSelect.innerHTML = '';
-
-        if (!voices.length) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No browser voices found yet';
-            voiceSelect.appendChild(option);
-            return;
-        }
-
-        let hasCurrentUri = false;
-        voices.forEach((voice) => {
-            const option = document.createElement('option');
-            option.value = voice.voiceURI || voice.name;
-            option.dataset.name = voice.name || '';
-            option.dataset.lang = voice.lang || '';
-            option.textContent = `${voice.name || 'Unnamed voice'} · ${voice.lang || 'unknown'}${voice.default ? ' · default' : ''}`;
-            if (currentUri && option.value === currentUri) {
-                option.selected = true;
-                hasCurrentUri = true;
-            }
-            voiceSelect.appendChild(option);
-        });
-
-        if (currentUri && !hasCurrentUri) {
-            const fallback = document.createElement('option');
-            fallback.value = currentUri;
-            fallback.dataset.name = currentName;
-            fallback.dataset.lang = currentLang;
-            fallback.selected = true;
-            fallback.textContent = `Saved voice unavailable here (${currentName || currentUri}); fallback will be used`;
-            voiceSelect.prepend(fallback);
-        } else if (!currentUri && currentName) {
-            const nameMatch = voices.find((voice) => voice.name === currentName && (!currentLang || voice.lang === currentLang))
-                || voices.find((voice) => voice.name === currentName);
-            if (nameMatch) voiceSelect.value = nameMatch.voiceURI || nameMatch.name;
-        }
-
-        syncVoiceHiddenInputs();
-    }
-
-    voiceSelect?.addEventListener('change', syncVoiceHiddenInputs);
-    previewBtn?.addEventListener('click', () => {
-        if (!window.WellHabitAudio) return;
-        window.WellHabitAudio.updateSettings(selectedVoicePayload());
-        window.WellHabitAudio.speak('This is how Care AI will read messages aloud.', selectedVoicePayload());
-    });
-    document.addEventListener('wellhabit:voices-updated', populateVoiceSelect);
-    window.setTimeout(populateVoiceSelect, 100);
-    window.setTimeout(populateVoiceSelect, 900);
 
     const svg = document.getElementById('mood-chart');
     const line = document.getElementById('mood-chart-line');
@@ -542,4 +410,7 @@
     });
 })();
 </script>
+{% if profile_locked %}
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
+{% endif %}
 {% endblock %}

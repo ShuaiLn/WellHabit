@@ -49,10 +49,11 @@
                 <p class="eyebrow">Selected day</p>
                 <h2>{{ selected_date.strftime('%A, %B %d, %Y') }}</h2>
             </div>
-            <span class="muted small">{{ selected_finished_items|length }} saved</span>
+            <span class="muted small">{{ selected_finished_items|length }} items</span>
         </div>
 
         <form method="post" action="{{ url_for('tasks.add_event') }}" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="event_date" value="{{ selected_date.isoformat() }}">
             <label>Event title
                 <input type="text" name="title" placeholder="Add an event" required>
@@ -74,7 +75,7 @@
         {% endif %}
 
         <div class="selected-day-stack">
-            <h3>Saved items</h3>
+            <h3>Tasks and saved items</h3>
             <div class="todo-list selected-day-list">
                 {% for item in selected_finished_items %}
                     <div class="todo-item {% if item.completed %}done{% endif %} {% if item.kind == 'event' %}event-item{% endif %}">
@@ -84,18 +85,20 @@
                         </div>
                         <div class="modal-actions">
                             {% if item.kind == 'task' %}
-                                <form method="post" action="{{ url_for(item.delete_endpoint, task_id=item.id) if item.kind == 'task' else url_for(item.delete_endpoint, event_id=item.id) }}">
+                                <form method="post" action="{{ url_for(item.delete_endpoint, task_id=item.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
                                 </form>
-                            {% else %}
+                            {% elif item.kind == 'event' %}
                                 <form method="post" action="{{ url_for(item.delete_endpoint, event_id=item.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button class="btn btn-ghost btn-sm btn-danger" type="submit">Delete</button>
                                 </form>
                             {% endif %}
                         </div>
                     </div>
                 {% else %}
-                    <p class="muted">No finished tasks on this date yet.</p>
+                    <p class="muted">No tasks or saved items on this date yet.</p>
                 {% endfor %}
             </div>
         </div>

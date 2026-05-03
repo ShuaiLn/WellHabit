@@ -7,39 +7,88 @@
             <div>
                 <p class="eyebrow">Daily log</p>
                 <h1>How was today?</h1>
-                <p class="muted">Start with mood and a short note. Open details only when you want to record more.</p>
+                <p class="muted">Pick any sections you want to record today. Leave the rest closed.</p>
             </div>
             <span class="muted small">{{ selected_date }}</span>
         </div>
 
         <form method="post" class="form-grid optional-log-form" id="daily-log-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label>Log date
                 <input type="date" name="log_date" value="{{ selected_date.isoformat() }}" required>
             </label>
 
             <div class="card card--muted card--compact">
                 <p class="eyebrow">What do you want to record?</p>
+                <p class="muted small">Tap any to record. Pick more than one if you want.</p>
                 <div class="quick-record-grid" id="field-picker-row">
-                    <button class="record-option" type="button" data-target="field-water">
+                    <button class="record-option" type="button" data-target="field-water" aria-pressed="false">
                         <strong>Water</strong>
                         <span>Amount only</span>
                     </button>
-                    <button class="record-option" type="button" data-target="field-sleep">
+                    <button class="record-option" type="button" data-target="field-sleep" aria-pressed="false">
                         <strong>Sleep</strong>
                         <span>Hours or range</span>
                     </button>
-                    <button class="record-option" type="button" data-target="field-exercise">
+                    <button class="record-option" type="button" data-target="field-exercise" aria-pressed="false">
                         <strong>Move</strong>
                         <span>Exercise and steps</span>
                     </button>
-                    <button class="record-option is-active" type="button" data-target="field-journal">
+                    <button class="record-option" type="button" data-target="field-journal" aria-pressed="false">
                         <strong>Journal</strong>
                         <span>Mood and notes</span>
                     </button>
                 </div>
             </div>
 
-            <div class="selectable-field" id="field-journal">
+            <label class="selectable-field is-hidden" id="field-water">Water amount
+                <input type="text" name="water_ml" placeholder="300 ml / a glass / a bottle">
+            </label>
+
+            <div class="selectable-field is-hidden" id="field-sleep">
+                <label>Sleep mode
+                    <select name="sleep_input_mode" id="sleep-input-mode">
+                        <option value="hours">Fill duration directly</option>
+                        <option value="range">Fill sleep time range</option>
+                    </select>
+                </label>
+                <label class="sleep-hours-block">Sleep hours
+                    <input type="number" name="sleep_hours" min="0" step="0.5" placeholder="7.5">
+                </label>
+                <div class="sleep-range-grid is-hidden" id="sleep-range-grid">
+                    <label>Sleep from
+                        <input type="time" name="sleep_start_time">
+                    </label>
+                    <label>Sleep to
+                        <input type="time" name="sleep_end_time">
+                    </label>
+                </div>
+            </div>
+
+            <div class="selectable-field is-hidden" id="field-exercise">
+                <div class="exercise-field-split">
+                    <div>
+                        <label>Exercise
+                            <input type="text" name="exercise_name" placeholder="Running, yoga, walking">
+                        </label>
+                        <div class="exercise-dual-grid">
+                            <label>Minutes
+                                <input type="number" name="exercise_minutes" min="0" placeholder="30">
+                            </label>
+                            <label>Reps
+                                <input type="number" name="exercise_reps" min="0" placeholder="20">
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Steps
+                            <input type="number" name="steps" min="0" placeholder="8500">
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="selectable-field is-hidden" id="field-journal">
                 <label>Journal
                     <textarea name="journal_text" rows="5" placeholder="Write a short note if you want to keep one."></textarea>
                 </label>
@@ -64,58 +113,6 @@
                     </div>
                 </div>
             </div>
-
-            <details class="details-block" id="log-details-block">
-                <summary>Detailed record</summary>
-                <div class="details-content">
-                    <label class="selectable-field is-hidden" id="field-water">Water amount
-                        <input type="text" name="water_ml" placeholder="300 ml / a glass / a bottle">
-                    </label>
-
-                    <div class="selectable-field is-hidden" id="field-sleep">
-                        <label>Sleep mode
-                            <select name="sleep_input_mode" id="sleep-input-mode">
-                                <option value="hours">Fill duration directly</option>
-                                <option value="range">Fill sleep time range</option>
-                            </select>
-                        </label>
-                        <label class="sleep-hours-block">Sleep hours
-                            <input type="number" name="sleep_hours" min="0" step="0.5" placeholder="7.5">
-                        </label>
-                        <div class="sleep-range-grid is-hidden" id="sleep-range-grid">
-                            <label>Sleep from
-                                <input type="time" name="sleep_start_time">
-                            </label>
-                            <label>Sleep to
-                                <input type="time" name="sleep_end_time">
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="selectable-field is-hidden" id="field-exercise">
-                        <div class="exercise-field-split">
-                            <div>
-                                <label>Exercise
-                                    <input type="text" name="exercise_name" placeholder="Running, yoga, walking">
-                                </label>
-                                <div class="exercise-dual-grid">
-                                    <label>Minutes
-                                        <input type="number" name="exercise_minutes" min="0" placeholder="30">
-                                    </label>
-                                    <label>Reps
-                                        <input type="number" name="exercise_reps" min="0" placeholder="20">
-                                    </label>
-                                </div>
-                            </div>
-                            <div>
-                                <label>Steps
-                                    <input type="number" name="steps" min="0" placeholder="8500">
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </details>
 
             <div class="modal-actions">
                 <button class="btn btn-primary" type="submit">Save</button>
@@ -178,18 +175,16 @@ if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && windo
 }
 (function () {
     const buttons = Array.from(document.querySelectorAll('.record-option[data-target]'));
-    const fields = Array.from(document.querySelectorAll('.selectable-field'));
-    const detailsBlock = document.getElementById('log-details-block');
-    function showField(targetId) {
-        fields.forEach((field) => {
-            const shouldShow = field.id === targetId || field.id === 'field-journal';
-            field.classList.toggle('is-hidden', !shouldShow);
-        });
-        buttons.forEach((btn) => btn.classList.toggle('is-active', btn.dataset.target === targetId));
-        if (targetId !== 'field-journal') detailsBlock.open = true;
+    function toggleField(targetId) {
+        const field = document.getElementById(targetId);
+        const button = buttons.find((btn) => btn.dataset.target === targetId);
+        if (!field || !button) return;
+        const shouldShow = field.classList.contains('is-hidden');
+        field.classList.toggle('is-hidden', !shouldShow);
+        button.classList.toggle('is-active', shouldShow);
+        button.setAttribute('aria-pressed', shouldShow ? 'true' : 'false');
     }
-    buttons.forEach((btn) => btn.addEventListener('click', () => showField(btn.dataset.target)));
-    showField('field-journal');
+    buttons.forEach((btn) => btn.addEventListener('click', () => toggleField(btn.dataset.target)));
 
     const sleepMode = document.getElementById('sleep-input-mode');
     const rangeGrid = document.getElementById('sleep-range-grid');
@@ -224,4 +219,7 @@ if (window.WellHabitHydrationOpenPrompt && window.WELLHABIT_PROMPTS.due && windo
     });
 })();
 </script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
+<script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='hydration.js') }}" defer></script>
 {% endblock %}

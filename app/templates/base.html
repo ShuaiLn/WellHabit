@@ -26,7 +26,6 @@
                         <a href="{{ url_for('main.break_view') }}">Rest</a>
                         <a href="{{ url_for('main.logs') }}">Logs</a>
                         <a href="{{ url_for('main.calendar_view') }}">Calendar</a>
-                        <a href="{{ url_for('main.dashboard', panel='care') }}" data-nav-care="1">Care AI</a>
                         <a href="{{ url_for('main.history_view') }}">History</a>
                         <a href="{{ url_for('main.profile') }}">Profile</a>
                         <form class="nav-logout-form" method="post" action="{{ url_for('auth.logout') }}">
@@ -61,7 +60,7 @@
             <div class="global-timer-time" id="global-timer-time">{{ "%02d:00"|format(app_ui_defaults.focus_minutes) }}</div>
             <div class="global-timer-activity" id="global-timer-activity">{{ app_ui_defaults.activity_label }}</div>
             <p class="global-timer-status" id="global-timer-status">Running</p>
-            <div class="global-timer-footer"><a href="{{ url_for('main.dashboard') }}" class="global-timer-link">Open</a></div>
+            <div class="global-timer-footer"><a href="{{ url_for('main.dashboard') }}" class="global-timer-link" draggable="false">Open</a></div>
         </div>
     </div>
     {% endif %}
@@ -203,39 +202,13 @@
             'breakMinutes': app_ui_defaults.break_minutes,
             'activityLabel': app_ui_defaults.activity_label,
             'defaultAvatarEmoji': ((current_avatar_emoji or current_user.avatar_emoji) if current_user.is_authenticated else '🙂')
-        }|tojson }},
-        tts: {{ ({
-            'enabled': current_user.tts_enabled,
-            'rate': current_user.tts_rate,
-            'voice_uri': current_user.tts_voice_uri,
-            'voice_name': current_user.tts_voice_name,
-            'voice_lang': current_user.tts_voice_lang,
-            'voice_preference': current_user.tts_voice_preference
-        } if current_user.is_authenticated else {
-            'enabled': False,
-            'rate': 1.0,
-            'voice_uri': '',
-            'voice_name': '',
-            'voice_lang': 'en-US',
-            'voice_preference': 'default'
-        })|tojson }}
+        }|tojson }}
     };
     window.currentAvatarEmoji = window.WELLHABIT_BOOTSTRAP.avatarEmoji || '🙂';
     window.WELLHABIT_PROMPTS = Object.assign({}, window.WELLHABIT_BOOTSTRAP.prompts || {}, window.WELLHABIT_PROMPTS || {});
     </script>
     <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='csrf.js') }}" defer></script>
     <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='nav_clock.js') }}" defer></script>
-    {% if current_user.is_authenticated %}
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='audio_manager.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='wellness_feedback.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='ai_followup.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pomodoro_timer.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='timer_widget.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='sleep_reminder.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='hydration.js') }}" defer></script>
-    <script nonce="{{ csp_nonce }}" src="{{ url_for('static', filename='pattern_modal.js') }}" defer></script>
-    {% endif %}
-
     {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -28,15 +28,18 @@
         </div>
         <div class="modal-actions pattern-modal-actions">
             <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="finished">
                 <label class="pattern-rating-label">Feel better? <input type="number" name="rating" min="1" max="10" placeholder="1-10"></label>
                 <button class="btn btn-primary" type="submit">Finished</button>
             </form>
             <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="not_yet">
                 <button class="btn btn-secondary" type="submit">Not yet</button>
             </form>
             <form class="pattern-response-form" method="post" action="{{ url_for('main.respond_pattern', state_id=pattern.id) }}" data-pattern-id="{{ pattern.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="no_thanks">
                 <button class="btn btn-ghost" type="submit">No thanks</button>
             </form>

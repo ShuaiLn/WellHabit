@@ -2,19 +2,14 @@
 {% block title %}Guided Break | WellHabit{% endblock %}
 {% block content %}
 <section class="break-shell" id="break-app" data-reason="{{ reason }}" data-default-exercise="{{ default_exercise_key }}" data-suggested-duration="{{ suggested_duration_sec }}" data-start-url="{{ url_for('main.break_start') }}" data-finish-url="{{ url_for('main.break_finish') }}" data-eye-embed-url="{{ eye_exercise_embed_url }}">
-    <header class="break-topbar card card--compact">
+    <header class="break-topbar">
         <div>
             <p class="eyebrow">Guided break · {{ reason|title }}</p>
-            <h1>Reset before your next focus block</h1>
-            <p class="muted">{{ time_of_day_copy }} Camera feedback is optional and is not medical advice.</p>
+            <h1>Take a soft reset</h1>
+            <p class="muted">Camera feedback is optional and stays in your browser.</p>
         </div>
-        <div class="break-timer-wrap">
-            <span class="soft-badge" id="break-state-pill">Loading</span>
-            <strong class="break-total-timer" id="break-total-timer" role="timer" aria-live="off">{{ '%02d:%02d'|format((suggested_duration_sec // 60), (suggested_duration_sec % 60)) }}</strong>
-            <div class="modal-actions">
-                <button class="btn btn-secondary btn-sm" type="button" id="break-see-all-btn">See all</button>
-                <button class="btn btn-primary btn-sm" type="button" id="break-end-btn">End break</button>
-            </div>
+        <div class="break-topbar-actions">
+            <button class="btn btn-ghost btn-sm" type="button" id="break-see-all-btn">See all</button>
         </div>
     </header>
 
@@ -22,13 +17,13 @@
         <div class="section-title-row">
             <div>
                 <p class="eyebrow">Choose one</p>
-                <h2>What kind of break do you want?</h2>
+                <h2>Pick a gentle next step</h2>
             </div>
-            <span class="muted small">Enter or click to start</span>
+            <span class="muted small">Press Enter or click to start</span>
         </div>
         <div class="break-picker-grid">
             {% for exercise in exercises %}
-            <button class="exercise-card picker-card {% if exercise.key == 'quiet_timer' %}picker-card--wide{% endif %}" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}">
+            <button class="exercise-card picker-card" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}">
                 <img src="{{ url_for('static', filename='break_assets/' ~ exercise.asset) }}" alt="" aria-hidden="true">
                 <span class="soft-badge">{{ exercise.type }} · {{ exercise.duration_sec }}s</span>
                 <strong>{{ exercise.title }}</strong>
@@ -39,78 +34,120 @@
     </section>
 
     <div class="break-layout" id="break-workspace">
-        <aside class="card card--compact break-sidebar">
-            <div class="section-title-row">
-                <div>
-                    <p class="eyebrow">Exercises</p>
-                    <h2>Break menu</h2>
-                </div>
-                <button class="link-btn" type="button" id="break-see-all-side-btn">See all</button>
-            </div>
+        <aside class="break-sidebar" aria-label="Break exercises">
+            <button class="break-rail-header" type="button" id="break-see-all-side-btn" aria-label="See all exercises">
+                <span>☰</span>
+            </button>
             <div class="break-exercise-list" role="listbox" aria-label="Break exercises">
                 {% for exercise in exercises %}
-                <button class="exercise-card list-row" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}" data-active="{{ 'true' if exercise.key == default_exercise_key else 'false' }}" tabindex="0">
+                <button class="exercise-card list-row" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}" data-active="{{ 'true' if exercise.key == default_exercise_key else 'false' }}" tabindex="0" title="{{ exercise.title }}">
                     <img src="{{ url_for('static', filename='break_assets/' ~ exercise.asset) }}" alt="" aria-hidden="true">
-                    <span>
+                    <span class="list-row-copy">
                         <strong>{{ exercise.title }}</strong>
                         <small>{{ exercise.short_desc }}</small>
                     </span>
-                    <span class="soft-badge">{{ exercise.duration_sec }}s</span>
+                    <span class="break-icon-tooltip">{{ exercise.title }}</span>
                 </button>
                 {% endfor %}
             </div>
         </aside>
 
-        <main class="card break-main-card">
+        <main class="break-main">
             <div class="break-stage" id="break-stage">
+                <div class="break-stage-top">
+                    <div class="break-ring-timer" id="break-ring-timer" role="timer" aria-live="off">
+                        <span class="break-ring-timer__time" id="break-total-timer">{{ '%02d:%02d'|format((suggested_duration_sec // 60), (suggested_duration_sec % 60)) }}</span>
+                    </div>
+                    <div class="break-progress-dots" id="break-progress-dots" aria-label="Exercise progress">
+                        <span class="break-progress-dot"></span>
+                        <span class="break-progress-dot"></span>
+                        <span class="break-progress-dot"></span>
+                        <span class="break-progress-dot"></span>
+                    </div>
+                    <div class="break-stage-controls">
+                        <button class="break-status-toggle" type="button" id="break-status-toggle" aria-label="Show break details">
+                            <span class="break-status-toggle__dot" id="break-status-dot"></span>
+                        </button>
+                        <button class="btn btn-ghost btn-sm" type="button" id="break-end-btn">End</button>
+                    </div>
+                </div>
+
                 <video id="break-video" autoplay muted playsinline hidden aria-hidden="true"></video>
                 <canvas id="break-canvas" hidden aria-hidden="true"></canvas>
                 <iframe id="break-eye-iframe" class="break-eye-iframe" src="" title="Eye exercise video" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen hidden></iframe>
                 <div class="breathing-orb" id="breathing-orb" hidden aria-hidden="true"><span></span></div>
-                <div class="alignment-score-badge" id="alignment-score-badge" hidden>Score --</div>
+                <div class="alignment-score-badge" id="alignment-score-badge" hidden>Reps 0</div>
+
                 <div class="break-camera-placeholder" id="break-placeholder">
-                    <strong>Getting ready</strong>
-                    <span id="break-placeholder-text">Loading guide...</span>
+                    <div class="break-stage-card" id="break-stage-card">
+                        <p class="eyebrow" id="current-exercise-type">Exercise</p>
+                        <h2 id="current-exercise-title">Guided exercise</h2>
+                        <p class="muted" id="current-exercise-desc">Choose an exercise to begin.</p>
+                        <div class="break-stage-card-actions" id="break-stage-card-actions">
+                            <button class="btn btn-primary" type="button" id="exercise-start-btn">Start exercise</button>
+                            <button class="btn btn-secondary" type="button" id="break-skip-camera-btn">Skip camera</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="guide-overlay" id="guide-overlay" aria-live="polite">Loading break guide...</div>
+
+                <div class="break-stage-card break-stage-card--overlay" id="pose-consent-card" hidden role="dialog" aria-modal="true" aria-labelledby="pose-consent-title">
+                    <p class="eyebrow">Optional camera feedback</p>
+                    <h2 id="pose-consent-title">Allow camera for posture feedback?</h2>
+                    <p class="muted">This stays in your browser. If you skip, breathing and eye reset still work smoothly.</p>
+                    <div class="break-stage-card-actions">
+                        <button class="btn btn-primary" type="button" id="pose-consent-ok">OK</button>
+                        <button class="btn btn-secondary" type="button" id="pose-consent-skip">Skip</button>
+                    </div>
+                </div>
+
+                <div class="break-baseline-card" id="baseline-card" hidden>
+                    <div class="break-baseline-ring" id="baseline-ring"><span id="baseline-ring-number">5</span></div>
+                    <div class="break-baseline-copy">
+                        <strong>Getting ready</strong>
+                        <span id="break-baseline-text">Stay still for a few seconds.</span>
+                    </div>
+                </div>
+
+                <div class="guide-overlay" id="guide-overlay" hidden aria-live="polite">
+                    <span id="guide-overlay-text">Loading break guide...</span>
+                </div>
+
+                <div class="break-complete-actions" id="break-complete-actions" hidden>
+                    <button class="btn btn-primary" type="button" id="break-next-btn">Next</button>
+                    <button class="btn btn-secondary" type="button" id="break-pick-another-btn">Pick another</button>
+                </div>
+
+                <div class="break-debug-panel card card--compact" id="break-debug-panel" hidden>
+                    <div class="break-debug-grid">
+                        <span id="break-camera-status">Camera: checking</span>
+                        <span id="break-model-status">Pose model: loading</span>
+                        <span id="break-current-phase">Phase: —</span>
+                        <span id="break-completed-count">Done: 0</span>
+                    </div>
+                    <p class="muted small">Camera is optional. Video is not uploaded or stored.</p>
+                </div>
             </div>
-            <div class="break-stage-footer">
-                <div>
-                    <p class="eyebrow" id="current-exercise-type">Exercise</p>
-                    <h2 id="current-exercise-title">Guided exercise</h2>
-                    <p class="muted" id="current-exercise-desc">Choose an exercise to begin.</p>
-                </div>
-                <button class="btn btn-primary" type="button" id="exercise-start-btn">Start exercise</button>
+
+            <div class="break-mobile-menu" aria-label="Break exercises">
+                {% for exercise in exercises %}
+                <button class="break-mobile-chip" type="button" data-exercise-key="{{ exercise.key }}" data-camera-required="{{ exercise.camera_required }}" data-active="{{ 'true' if exercise.key == default_exercise_key else 'false' }}">
+                    <img src="{{ url_for('static', filename='break_assets/' ~ exercise.asset) }}" alt="" aria-hidden="true">
+                    <span>{{ exercise.title }}</span>
+                </button>
+                {% endfor %}
             </div>
         </main>
-
-        <aside class="card card--compact break-right-panel">
-            <p class="eyebrow">Progress</p>
-            <h2>Session</h2>
-            <div class="progress-track"><div class="progress-fill" id="break-progress-fill" style="width:0%;"></div></div>
-            <div class="fatigue-metric-grid">
-                <span id="break-camera-status">Camera: checking</span>
-                <span id="break-model-status">Pose model: loading</span>
-                <span id="break-current-phase">Phase: —</span>
-                <span id="break-completed-count">Done: 0</span>
-            </div>
-            <div class="card card--muted card--compact">
-                <p class="eyebrow">Privacy</p>
-                <p class="muted small">Camera is optional. Pose feedback runs in the browser when available. Video is not uploaded or stored by this page.</p>
-            </div>
-            <button class="btn btn-secondary full-width" type="button" id="break-skip-camera-btn">Skip detection</button>
-        </aside>
     </div>
 
-    <div class="pose-consent-toast card card--compact" id="pose-consent-toast" hidden role="dialog" aria-modal="true" aria-labelledby="pose-consent-title">
-        <div>
-            <p class="eyebrow">Optional camera feedback</p>
-            <h2 id="pose-consent-title">Use pose detection for this break?</h2>
-            <p class="muted small">Pose detection uses your camera to give posture feedback. It runs in your browser when available; video is not uploaded or stored by this page.</p>
-        </div>
-        <div class="modal-actions">
-            <button class="btn btn-primary btn-sm" type="button" id="pose-consent-ok">OK</button>
-            <button class="btn btn-secondary btn-sm" type="button" id="pose-consent-skip">Skip detection</button>
+    <div class="habit-modal-overlay" id="break-confirm-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="break-confirm-title">
+            <p class="eyebrow" id="break-confirm-eyebrow">Break</p>
+            <h2 id="break-confirm-title">Continue?</h2>
+            <p class="muted" id="break-confirm-message">Ready when you are.</p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" type="button" id="break-confirm-confirm">Continue</button>
+                <button class="btn btn-secondary" type="button" id="break-confirm-cancel">Cancel</button>
+            </div>
         </div>
     </div>
 

@@ -1,17 +1,24 @@
 from pathlib import Path
 import logging
+import mimetypes
 import os
 import sqlite3
 import secrets
 from logging.handlers import RotatingFileHandler
 
-from flask import Flask, Response, g, jsonify, redirect, request, url_for
+from flask import Flask, Response, flash, g, jsonify, redirect, request, url_for
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import SQLAlchemyError
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from .constants import DEFAULT_LOG_LEVEL, EYE_EXERCISE_THRESHOLD_MINUTES, LOG_BACKUP_COUNT, LOG_MAX_BYTES
+
+# Ensure browser module / WASM assets are served with safe MIME types.
+# Without these, X-Content-Type-Options: nosniff can block MediaPipe.
+mimetypes.add_type('application/javascript', '.mjs')
+mimetypes.add_type('application/wasm', '.wasm')
+mimetypes.add_type('application/octet-stream', '.task')
 
 
 db = SQLAlchemy()
@@ -562,6 +569,7 @@ def create_app():
         SQLALCHEMY_ENGINE_OPTIONS={'connect_args': {'timeout': 15}},
         LOG_LEVEL=os.getenv('LOG_LEVEL', DEFAULT_LOG_LEVEL),
         WTF_CSRF_TIME_LIMIT=60 * 60 * 8,
+        MAX_CONTENT_LENGTH=int(os.getenv('MAX_CONTENT_LENGTH_BYTES', str(8 * 1024 * 1024))),
         USING_EPHEMERAL_SECRET_KEY=using_ephemeral_secret_key,
     )
 
@@ -596,11 +604,26 @@ def create_app():
     @app.after_request
     def apply_security_headers(response):
         nonce = getattr(g, 'csp_nonce', '')
+        wasm_allowed = (
+            request.path.startswith('/break')
+            or request.path.startswith('/static/vendor/mediapipe')
+            or request.path in (
+                '/',
+                '/dashboard',
+                '/static/vision_loader.js',
+                '/static/pose_monitor.js',
+                '/static/break_session.js',
+                '/static/fatigue_monitor.js',
+            )
+        )
+        wasm_policy = "'wasm-unsafe-eval' 'unsafe-eval'" if wasm_allowed else ''
         response.headers.setdefault(
             'Content-Security-Policy',
-            "default-src 'self'; script-src 'nonce-{}' 'strict-dynamic' {} https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com; worker-src 'self' blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'".format(
+            "default-src 'self'; script-src 'self' 'nonce-{}' 'strict-dynamic' {}; script-src-elem 'self' 'nonce-{}' {}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self' blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'self'".format(
                 nonce,
-                "'wasm-unsafe-eval'" if request.path.startswith('/break') else '',
+                wasm_policy,
+                nonce,
+                wasm_policy,
             ),
         )
         response.headers.setdefault('X-Content-Type-Options', 'nosniff')
@@ -613,6 +636,18 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+
+    @app.errorhandler(413)
+    def handle_payload_too_large(error):
+        wants_json = (
+            request.is_json
+            or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            or (request.accept_mimetypes.best or '').startswith('application/json')
+        )
+        if wants_json:
+            return jsonify({'message': 'Upload too large. Please keep files under 8 MB.'}), 413
+        flash('That upload is too large. Please choose an image under 8 MB.', 'warning')
+        return redirect(request.referrer or url_for('main.profile')), 303
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error: CSRFError):
