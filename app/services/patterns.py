@@ -502,6 +502,7 @@ def record_camera_fatigue_signal(user: User, payload: dict) -> dict:
     fatigue_score = max(0.0, min(1.0, _safe_float(metrics.get('fatigue_score'), 0.0)))
     perclos = max(0.0, min(1.0, _safe_float(metrics.get('perclos'), 0.0)))
     yawn_count = max(0, _safe_int(metrics.get('yawn_count_10m'), 0))
+    positive_affect_signal = bool(metrics.get('possible_positive_affect_signal')) or event_type == 'possible_relaxed_affect'
     microsleep = bool(metrics.get('microsleep')) or event_type == 'microsleep'
     heavy = event_type in {'heavy_signal', 'microsleep', 'break_confirmed'} or fatigue_score >= 0.70 or microsleep
     mild = event_type == 'mild_signal' or fatigue_score >= 0.50
@@ -513,13 +514,15 @@ def record_camera_fatigue_signal(user: User, payload: dict) -> dict:
         f'perclos={perclos:.2f}',
         f'yawns_10m={yawn_count}',
     ]
+    if positive_affect_signal:
+        detail_parts.append('possible_positive_affect_signal=true')
     activity_label = str(timer.get('activity_label') or '').strip()
     if activity_label:
         detail_parts.append(f'activity={activity_label[:80]}')
     db.session.add(ActivityEntry(
         user_id=user.id,
         entry_type='camera_fatigue',
-        title='Possible fatigue signal during focus' if mild or heavy else 'Camera focus signal sampled',
+        title='Possible relaxed affect signal during focus' if positive_affect_signal else ('Possible fatigue signal during focus' if mild or heavy else 'Camera focus signal sampled'),
         description=' · '.join(detail_parts),
         event_at=now,
     ))

@@ -8,7 +8,7 @@ MAX_SINGLE_WATER_ML = 2000
 MAX_DAILY_WATER_ML = 8000
 HYDRATION_DUE_GRACE_MINUTES = 75
 HYDRATION_EXTRA_MIN_GAP_MINUTES = 45
-EYE_EXERCISE_THRESHOLD_MINUTES = 25
+EYE_EXERCISE_THRESHOLD_MINUTES = 20
 DEFAULT_POMODORO_FOCUS_MINUTES = 25
 DEFAULT_POMODORO_BREAK_MINUTES = 5
 DEFAULT_POMODORO_ACTIVITY_LABEL = "work"
@@ -139,8 +139,8 @@ BREAK_EXERCISES = [
         "default_for": ["fatigue"],
         "camera_required": "required",
         "phases": [
-            {"label": "Inhale · open chest", "seconds": 3},
-            {"label": "Exhale · round back", "seconds": 3},
+            {"label": "Inhale · ↑ Lift chest, look up gently", "seconds": 3},
+            {"label": "Exhale · ↓ Round back, drop chin", "seconds": 3},
         ],
         "pose_checks": ["Shoulder, hip, and nose relationships estimate open, rounded, or neutral posture."],
     },
@@ -165,7 +165,7 @@ BREAK_EXERCISES = [
     {
         "key": "eye_reset",
         "title": "Eye Reset",
-        "short_desc": "A 2-minute 20-20-20 style eye break.",
+        "short_desc": "A 2-minute eye rest with a guided video.",
         "long_desc": "Rest your eyes by looking away from the screen and following a gentle eye reset video. No camera is needed.",
         "type": "eyes",
         "duration_sec": 120,
@@ -175,28 +175,8 @@ BREAK_EXERCISES = [
         "default_for": ["fatigue"],
         "camera_required": "none",
         "phases": [
-            {"label": "Look 20ft away", "seconds": 20},
-            {"label": "Blink slowly", "seconds": 20},
-            {"label": "Look left and right", "seconds": 20},
-            {"label": "Look up and down", "seconds": 20},
-            {"label": "Close eyes gently", "seconds": 20},
-            {"label": "Breathe and relax", "seconds": 20},
+            {"label": "Follow the video", "seconds": 120},
         ],
-        "pose_checks": [],
-    },
-    {
-        "key": "quiet_timer",
-        "title": "Just Close Your Eyes",
-        "short_desc": "No movement. One quiet minute.",
-        "long_desc": "A simple no-camera rest option for days when you do not want to move.",
-        "type": "breathing",
-        "duration_sec": 60,
-        "intensity": 0,
-        "benefits": ["Low effort", "Camera-free", "Quick recovery"],
-        "asset": "quiet_timer.svg",
-        "default_for": ["manual"],
-        "camera_required": "none",
-        "phases": [],
         "pose_checks": [],
     },
 ]

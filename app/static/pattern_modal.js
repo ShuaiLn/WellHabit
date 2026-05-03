@@ -20,6 +20,38 @@
         if (category) message.classList.add(category);
     }
 
+    function currentCsrfToken() {
+        if (window.WellHabitGetCsrfToken) return window.WellHabitGetCsrfToken();
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? (meta.getAttribute('content') || '') : '';
+    }
+
+    function ensureFreshCsrf(form) {
+        if (!form) return;
+        const token = currentCsrfToken();
+        if (!token) return;
+        let input = form.querySelector('input[name="csrf_token"]');
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'csrf_token';
+            form.prepend(input);
+        }
+        input.value = token;
+    }
+
+    function submitWithRefresh(form, modal) {
+        ensureFreshCsrf(form);
+        setMessage(modal, 'Saving by refreshing the page...', 'info');
+        window.setTimeout(() => {
+            try {
+                HTMLFormElement.prototype.submit.call(form);
+            } catch (error) {
+                form.submit();
+            }
+        }, 120);
+    }
+
     function markCardsAfterResponse(patternId, data) {
         document.querySelectorAll(`[data-pattern-card-open="pattern-modal-${patternId}"]`).forEach((card) => {
             card.classList.add('is-responded');
@@ -67,6 +99,7 @@
         const form = event.target.closest('.pattern-response-form');
         if (!form) return;
         event.preventDefault();
+        ensureFreshCsrf(form);
 
         const modal = form.closest('.pattern-modal-overlay');
         const submitButton = form.querySelector('button[type="submit"]');
@@ -78,15 +111,25 @@
         setMessage(modal, 'Saving pattern response...', 'info');
 
         try {
+            const headers = window.WellHabitCsrfHeaders ? window.WellHabitCsrfHeaders({
+                'Accept': 'application/json',
+                'X-Requested-With': 'fetch'
+            }) : {
+                'Accept': 'application/json',
+                'X-Requested-With': 'fetch',
+                'X-CSRFToken': currentCsrfToken()
+            };
             const response = await fetch(form.action, {
                 method: 'POST',
-                headers: window.WellHabitCsrfHeaders({
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'fetch'
-                }),
+                headers,
                 body: new FormData(form),
                 credentials: 'same-origin'
             });
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            if (!contentType.includes('application/json')) {
+                submitWithRefresh(form, modal);
+                return;
+            }
             const data = await response.json();
             setMessage(modal, data.message || 'Saved.', data.category || (data.ok ? 'success' : 'warning'));
             if (data.ok) {
@@ -94,7 +137,7 @@
                 window.setTimeout(() => closePatternModal(modal), 650);
             }
         } catch (error) {
-            setMessage(modal, 'Could not save without refreshing. Please try again.', 'warning');
+            submitWithRefresh(form, modal);
         } finally {
             if (submitButton) {
                 submitButton.disabled = false;

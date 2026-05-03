@@ -16,10 +16,23 @@ HYDRATION_WORDS = ['drink', 'water', 'hydration', 'milk', 'coke', 'beverage']
 MEAL_WORDS = ['breakfast', 'lunch', 'dinner', 'meal']
 FITNESS_WORDS = ['steps', 'exercise', 'walk', 'run', 'stretch', 'yoga']
 FOCUS_WORDS = ['pomodoro', 'focus', 'study', 'work session']
-POSITIVE_CARE_WORDS = ['calmer', 'grounded', 'relieved', 'better', 'hopeful', 'reassured', 'steadier']
-NEGATIVE_CARE_WORDS = ['still distressed', 'still anxious', 'still overwhelmed', 'panicked', 'unsafe', 'hopeless', 'spiraling']
-LOW_ENERGY_WORDS = ['exhausted', 'drained', 'worn out', 'burned out']
-NEGATIVE_MOOD_WORDS = ['tired', 'anxious', 'sad', 'stress', 'stressed', 'burned out']
+POSITIVE_CARE_WORDS = ['explicitly said they felt a little better', 'user reported feeling happy', 'user reported feeling calm', 'user reported feeling hopeful']
+NEGATIVE_CARE_WORDS = [
+    'no explicit improvement reported',
+    'still distressed',
+    'still anxious',
+    'still overwhelmed',
+    'user reported feeling anxious',
+    'user reported feeling stressed',
+    'user reported feeling overwhelmed',
+    'user reported feeling sad',
+    'panicked',
+    'unsafe',
+    'hopeless',
+    'spiraling',
+]
+LOW_ENERGY_WORDS = ['exhausted', 'drained', 'worn out', 'burned out', 'user reported feeling exhausted']
+NEGATIVE_MOOD_WORDS = ['tired', 'anxious', 'sad', 'stress', 'stressed', 'burned out', 'overwhelmed']
 
 
 def infer_event_impacts(title: str | None = None, description: str | None = None) -> dict[str, int]:
@@ -42,6 +55,7 @@ def infer_event_impacts(title: str | None = None, description: str | None = None
     is_meal = any(word in text for word in MEAL_WORDS)
     is_hydration = any(word in text for word in HYDRATION_WORDS)
     is_task_completion = 'completed todo' in text or 'completed meal' in text or 'meal finished' in title_text
+    is_care_chat = 'care chat' in text or 'supportive chat' in text or 'support chat' in text
 
     if is_hydration:
         if any(word in text for word in ['skip', 'dismiss', 'not yet', 'not_yet', 'postponed']):
@@ -60,22 +74,24 @@ def infer_event_impacts(title: str | None = None, description: str | None = None
         impacts['fitness'] += 4
     elif any(word in text for word in FOCUS_WORDS) or (is_task_completion and not is_hydration):
         impacts['focus'] += 5
-    if any(word in text for word in ['journal', 'mood', 'stress', 'feeling', 'felt']):
+    if not is_care_chat and any(word in text for word in ['journal', 'mood', 'stress', 'feeling', 'felt']):
         impacts['mood'] += 3
-    if any(word in text for word in NEGATIVE_MOOD_WORDS):
+    if not is_care_chat and any(word in text for word in NEGATIVE_MOOD_WORDS):
         impacts['mood'] -= 4
 
-    if 'care chat' in text or 'supportive chat' in text or 'support chat' in text:
-        if any(word in text for word in POSITIVE_CARE_WORDS):
-            impacts['mood'] += 4
-            impacts['focus'] += 2
-        if any(word in text for word in NEGATIVE_CARE_WORDS):
-            impacts['mood'] -= 5
-            impacts['focus'] -= 2
+    if is_care_chat:
+        has_explicit_improvement = any(word in text for word in POSITIVE_CARE_WORDS)
+        has_negative_state = any(word in text for word in NEGATIVE_CARE_WORDS)
+        if has_negative_state and has_explicit_improvement:
+            impacts['mood'] += 2
+            impacts['focus'] += 1
+        elif has_negative_state:
+            impacts['mood'] -= 6
+        elif has_explicit_improvement:
+            impacts['mood'] += 3
+            impacts['focus'] += 1
         if any(word in text for word in LOW_ENERGY_WORDS):
             impacts['energy'] -= 2
-        if any(word in text for word in ['water', 'hydration', 'drink']) and any(word in text for word in ['grounded', 'calmer', 'better']):
-            impacts['hydration'] += 2
 
     impacts['overall'] = int(round((impacts['hydration'] + impacts['energy'] + impacts['fitness'] + impacts['focus'] + impacts['mood']) / 3))
     return impacts

@@ -329,6 +329,7 @@
                 return;
             }
 
+            document.dispatchEvent(new CustomEvent('wellhabit:hydration-saved', { detail: body }));
             amountEl.value = '';
             customEl.value = '';
             closePrompt();
@@ -348,7 +349,6 @@
             }
 
             await refreshPromptState();
-            document.dispatchEvent(new CustomEvent('wellhabit:hydration-saved', { detail: body }));
         } catch (error) {
             console.error('Hydration response failed', error);
             alert('Saving the hydration response failed. Please try again.');

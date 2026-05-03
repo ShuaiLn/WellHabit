@@ -100,10 +100,6 @@
     }
 
     function playTimerBeep() {
-        if (window.WellHabitAudio?.playPromptBeep) {
-            window.WellHabitAudio.playPromptBeep();
-            return;
-        }
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             if (!AudioContextClass) return;
@@ -304,6 +300,7 @@
             if (body.avatar_emoji && window.WellHabitSetAvatarEmoji) window.WellHabitSetAvatarEmoji(body.avatar_emoji);
             if (body.wellness_feedback && window.WellHabitShowWellnessFeedback) window.WellHabitShowWellnessFeedback(body.wellness_feedback);
             if (body.eye_prompt && window.WellHabitOpenEyeExercisePrompt) window.WellHabitOpenEyeExercisePrompt(body.eye_prompt);
+            document.dispatchEvent(new CustomEvent('wellhabit:focus-session-saved', { detail: body }));
         } catch (error) {
             localStorage.removeItem(lockKey);
             const latest = readState();

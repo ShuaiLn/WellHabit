@@ -1,7 +1,7 @@
 import json
 from datetime import date, datetime, timedelta
 
-from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 
 from .. import db
@@ -343,18 +343,10 @@ def profile():
     if request.method == 'POST':
         action = (request.form.get('action') or 'save_profile').strip().lower()
 
-        if action == 'update_voice_settings':
-            current_user.tts_enabled = (request.form.get('tts_enabled') == '1')
-            current_user.tts_rate = float(_parse_float(request.form.get('tts_rate'), default=1.0) or 1.0)
-            current_user.tts_rate = max(0.5, min(1.5, current_user.tts_rate))
-            current_user.tts_voice_uri = _clean_text(request.form.get('tts_voice_uri'), 255) or None
-            current_user.tts_voice_name = _clean_text(request.form.get('tts_voice_name'), 160) or None
-            current_user.tts_voice_lang = _clean_text(request.form.get('tts_voice_lang'), 20) or 'en-US'
-            voice_preference = (request.form.get('tts_voice_preference') or 'default').strip().lower()
-            current_user.tts_voice_preference = voice_preference if voice_preference in {'default', 'female', 'male'} else 'default'
-            db.session.commit()
-            flash('Voice settings were updated.', 'success')
-            return redirect(url_for('main.profile'))
+
+
+
+
 
         if action == 'update_hydration_schedule':
             if not locked:
@@ -434,6 +426,8 @@ def profile():
         past_pattern_cards=get_past_pattern_cards(current_user.id) if locked else [],
         pattern_learning=get_pattern_learning_state(current_user.id) if locked else {'ready': False, 'active_days': 0, 'logged_days': 0, 'min_active_days': 7},
         break_habits=_break_habits_payload(current_user.id) if locked else None,
+        profile_initial_tab=request.args.get('tab') or 'basic',
+        profile_today=local_today(),
     )
 
 
@@ -444,6 +438,56 @@ def pomodoro_fatigue_signal():
     result = record_camera_fatigue_signal(current_user, payload)
     db.session.commit()
     return jsonify(result)
+
+
+
+
+@bp.route('/api/affect/confirm', methods=['POST'])
+@login_required
+def affect_confirm():
+    data = request.get_json(silent=True) or {}
+    answer = (data.get('answer') or '').strip().lower()
+    if answer not in {'yes', 'no', 'not_sure'}:
+        return jsonify({'ok': False, 'message': 'Invalid confirmation answer.'}), 400
+    evidence = data.get('evidence') if isinstance(data.get('evidence'), dict) else {}
+    flags = evidence.get('flags') if isinstance(evidence.get('flags'), dict) else {}
+    camera_metrics = evidence.get('camera_metrics') if isinstance(evidence.get('camera_metrics'), dict) else {}
+    context = evidence.get('context') if isinstance(evidence.get('context'), dict) else {}
+
+    # Important: do not store an inferred emotion. Store only the user's
+    # confirmation response plus the weak-signal evidence that led to the prompt.
+    mood_label = 'calm' if answer == 'yes' else 'normal'
+    flag_names = ', '.join(sorted(key for key, value in flags.items() if value)) or 'none'
+    metric_summary = []
+    if 'perclos' in camera_metrics:
+        metric_summary.append(f"perclos={camera_metrics.get('perclos')}")
+    if 'smile_blendshape' in camera_metrics:
+        metric_summary.append(f"smile={camera_metrics.get('smile_blendshape')}")
+    if 'brow_inner_up' in camera_metrics:
+        metric_summary.append(f"brow_inner_up={camera_metrics.get('brow_inner_up')}")
+    summary = (
+        f"Multimodal relaxed-affect check answered: {answer}. "
+        f"Signals: {flag_names}. "
+        f"Metrics: {', '.join(metric_summary) if metric_summary else 'derived weak camera signal only'}."
+    )[:1000]
+    entry = _record_mood_entry(
+        current_user.id,
+        'multimodal_confirm',
+        mood_label,
+        None,
+        summary=summary,
+        event_at=local_now().replace(tzinfo=None),
+        detected_by='multimodal',
+    )
+    _log_activity_entry(
+        current_user.id,
+        'affect_confirm',
+        'Multimodal check-in answered',
+        f"Answer: {answer} · signals: {flag_names}",
+        event_at=entry.event_at,
+    )
+    db.session.commit()
+    return jsonify({'ok': True, 'answer': answer, 'mood_entry_id': entry.id})
 
 
 @bp.route('/patterns/<int:state_id>/respond', methods=['POST'])
@@ -737,11 +781,9 @@ def calendar_view():
     ).all()
     break_dates = {row.started_at.date() for row in month_breaks if row.started_at}
 
-    selected_tasks = Task.query.filter_by(user_id=current_user.id, task_date=selected_date, completed=True).order_by(Task.sort_order.asc(), Task.created_at.asc()).all()
-    selected_events = sorted(
-        CalendarEvent.query.filter_by(user_id=current_user.id, event_date=selected_date).all(),
-        key=_event_sort_key,
-    )
+    selected_tasks = Task.query.filter_by(user_id=current_user.id, task_date=selected_date).order_by(Task.sort_order.asc(), Task.created_at.asc()).all()
+    selected_events = CalendarEvent.query.filter_by(user_id=current_user.id, event_date=selected_date).all()
+    selected_events = sorted(selected_events, key=_event_sort_key)
     selected_finished_items = _selected_day_finished_items(selected_events, selected_tasks)
     selected_log = DailyLog.query.filter_by(user_id=current_user.id, log_date=selected_date).first()
 

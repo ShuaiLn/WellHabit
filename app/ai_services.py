@@ -897,6 +897,32 @@ def _care_topic_summary(messages: list[dict[str, str]]) -> str:
         topic = topic[:110].rstrip(' ,.;:') + '…'
     return f"{prefix}: {topic}."
 
+def _care_user_reported_improvement(user_text: str) -> bool:
+    lowered = (user_text or '').lower()
+    patterns = [
+        r'\bi\s+(feel|felt|am|\'m)\s+(a\s+little\s+|slightly\s+|much\s+)?(better|calmer|relieved|grounded|okay|ok|fine|hopeful)\b',
+        r'\bi\s+feel\s+less\s+(anxious|sad|stressed|overwhelmed|panicked)\b',
+        r'\bi\s+(feel|felt)\s+more\s+(calm|grounded|hopeful|steady)\b',
+        r'\bthat\s+helped\b',
+    ]
+    if any(re.search(pattern, lowered) for pattern in patterns):
+        return True
+    return any(phrase in user_text for phrase in ['好多了', '好一点', '没那么焦虑', '平静一点', '冷静一点', '感觉好些'])
+
+
+def _care_safe_latest_event(user_text: str, detected_mood: str | None, fallback_event: str | None = None) -> str:
+    mood = _normalize_mood_key(detected_mood)
+    explicit_improvement = _care_user_reported_improvement(user_text)
+    if mood in {'anxious', 'stressed', 'overwhelmed', 'sad', 'exhausted'}:
+        if explicit_improvement:
+            return f"Care chat ended: user reported feeling {mood} and explicitly said they felt a little better"
+        return f"Care chat ended: user reported feeling {mood}; no explicit improvement reported"
+    if mood in {'happy', 'calm', 'hopeful'}:
+        return f"Care chat ended: user reported feeling {mood}"
+    cleaned = (fallback_event or '').strip()
+    return cleaned or 'Care chat ended: user talked about their feelings; no explicit improvement reported'
+
+
 def _fallback_care_chat_summary(messages: list[dict[str, str]], wellness_scores: dict[str, Any] | None = None) -> dict[str, Any]:
     transcript = '\n'.join((item.get('content') or '').strip() for item in messages[-12:])
     user_messages = ' '.join((item.get('content') or '').strip() for item in messages if (item.get('role') or '').lower() == 'user')
@@ -917,15 +943,14 @@ def _fallback_care_chat_summary(messages: list[dict[str, str]], wellness_scores:
     mood_info = _fallback_detect_mood(user_messages, preferred=feelings[0] if feelings else None)
     topic_summary = _care_topic_summary(messages)
 
+    explicit_improvement = _care_user_reported_improvement(user_messages)
     if flags['high_distress']:
         summary = f"{topic_summary} The emotional tone stayed intense across the chat."
-        latest_event = f"Care chat ended: user felt {feeling_text} and still distressed after the conversation"
-    elif flags['positive'] and not flags['stress']:
-        summary = f"{topic_summary} The chat ended on a steadier or more positive note."
-        latest_event = f"Care chat ended: user felt {feeling_text} and more grounded after the conversation"
+    elif explicit_improvement:
+        summary = f"{topic_summary} The user explicitly reported feeling a little better."
     else:
-        summary = f"{topic_summary} The chat ended a little calmer than it started."
-        latest_event = f"Care chat ended: user felt {feeling_text} and slightly calmer after the conversation"
+        summary = f"{topic_summary} The chat focused on naming the feeling and possible next steps."
+    latest_event = _care_safe_latest_event(user_messages, mood_info['mood_label'])
 
     return {
         'summary': summary,
@@ -963,10 +988,11 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
                 'Return ONLY valid JSON.',
                 'The summary should be 1 or 2 short sentences and should sound specific, not generic.',
                 'Focus the summary almost entirely on what the user talked about, felt, or was processing in the chat. Avoid generic phrases like supportive check-in unless the content really says that.',
-                'The latest_event should be short and mention the emotional state before and after the chat when possible.',
-                'Use phrases like anxious, tired, calmer, grounded, relieved, hopeful, overwhelmed only when supported by the chat.',
+                "The latest_event should describe the user\'s own emotional state, not the assistant\'s support technique.",
+                'Do not say calmer, grounded, relieved, better, or hopeful unless the USER explicitly said they felt that way.',
+                'If the user was anxious, sad, stressed, exhausted, or overwhelmed and did not explicitly say they felt better, latest_event must say no explicit improvement was reported.',
                 'Do not invent medical claims or dramatic details.',
-                'Also classify the main mood of the chat.',
+                'Also classify the main mood of the chat based primarily on USER messages.',
             ],
             'wellness_scores': wellness_scores or {},
             'recent_messages': cleaned_messages[-12:],
@@ -990,7 +1016,9 @@ def summarize_care_chat_session(messages: list[dict[str, str]], wellness_scores:
         if detected_mood not in MOOD_VALUE_MAP and detected_mood != 'mixed':
             detected_mood = _fallback_detect_mood(' '.join(item['content'] for item in cleaned_messages if item['role'] == 'user')).get('mood_label', 'normal')
         detected_mood_display = str(payload.get('detected_mood_display') or mood_display_label(detected_mood)).strip()[:60]
+        user_text = ' '.join(item['content'] for item in cleaned_messages if item['role'] == 'user')
         mood_value = _clamp_score(float(payload.get('mood_value') or mood_value_for_label(detected_mood)))
+        latest_event = _care_safe_latest_event(user_text, detected_mood, latest_event)
         return {
             'summary': summary,
             'latest_event': latest_event,
@@ -1160,6 +1188,9 @@ def update_wellness_scores(
                 'Completing a hydration task should mostly affect hydration, not focus.',
                 'Completing a meal task should mainly affect energy and fitness, not focus or mood.',
                 'Skipping a meal should not create a positive score change.',
+                'For Care chat events, do not increase mood just because the assistant suggested calming techniques.',
+                'For Care chat events with anxious, sad, stressed, exhausted, or overwhelmed mood and no explicit improvement reported, mood should stay neutral or decrease slightly.',
+                'For Care chat events where the user explicitly said they felt better, mood may increase only slightly.',
                 'Overall wellness should be based on the five category scores.',
                 'The summary must react to the score change versus current_scores.',
                 'If the update is positive overall, the summary should encourage the user in a warm motivational tone.',

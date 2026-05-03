@@ -112,6 +112,9 @@
         applyWidgetUi();
     }
 
+    widget.addEventListener('selectstart', (event) => event.preventDefault());
+    widget.addEventListener('dragstart', (event) => event.preventDefault());
+
     widgetMiniToggle?.addEventListener('click', () => {
         const current = readWidgetUi();
         writeWidgetUi({ minimized: !current.minimized });

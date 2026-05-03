@@ -53,7 +53,6 @@
             if (questionEl) questionEl.textContent = questionText;
             renderButtons();
             overlay.hidden = false;
-            window.WellHabitAudio?.speak?.(`${taskText}. ${questionText}`);
         }
 
         laterBtn?.addEventListener('click', hide);
@@ -82,7 +81,6 @@
             if (titleEl) titleEl.textContent = titleText;
             if (detailEl) detailEl.textContent = detailText;
             overlay.hidden = false;
-            window.WellHabitAudio?.speak?.(`${titleText}. ${detailText}`);
         }
 
         function showWhenReady(prompt) {

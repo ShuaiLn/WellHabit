@@ -1,6 +1,5 @@
-const MEDIAPIPE_CACHE = 'wellhabit-mediapipe-v2';
+const MEDIAPIPE_CACHE = 'wellhabit-mediapipe-v3';
 const CACHE_ALLOWLIST = new Set([MEDIAPIPE_CACHE]);
-const CACHE_HOSTS = new Set(['cdn.jsdelivr.net', 'storage.googleapis.com']);
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
@@ -13,32 +12,29 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Never touch dynamic app routes or future voice/profile APIs. Only static
-  // MediaPipe assets should ever be served from this worker cache.
+  // Never touch dynamic app routes. Only static MediaPipe assets should
+  // ever be served from this worker cache.
   if (url.origin === self.location.origin && (
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/profile') ||
-    url.pathname.startsWith('/tasks/') ||
-    url.pathname.includes('/voice')
+    url.pathname.startsWith('/tasks/')
   )) {
     return;
   }
 
-  const isLocalPoseAsset = url.origin === self.location.origin && url.pathname.includes('/static/break_assets/pose_landmarker_lite.task');
-  const isMediaPipeAsset = isLocalPoseAsset || (CACHE_HOSTS.has(url.hostname) && (
-    url.pathname.includes('/@mediapipe/tasks-vision') ||
-    url.pathname.includes('/mediapipe-models/face_landmarker') ||
-    url.pathname.includes('/mediapipe-models/pose_landmarker')
-  ));
+  const isSameOrigin = url.origin === self.location.origin;
+  const isLocalMediaPipeRuntime = isSameOrigin && url.pathname.includes('/static/vendor/mediapipe/');
+  const isLocalTaskModel = isSameOrigin &&
+    url.pathname.startsWith('/static/break_assets/') &&
+    url.pathname.endsWith('.task');
+  const isMediaPipeAsset = isLocalMediaPipeRuntime || isLocalTaskModel;
   if (!isMediaPipeAsset || event.request.method !== 'GET') return;
 
   event.respondWith(
     caches.open(MEDIAPIPE_CACHE).then(async (cache) => {
       const cached = await cache.match(event.request);
-      const fetchOptions = url.origin === self.location.origin ? undefined : { mode: 'cors', credentials: 'omit' };
-      const networkPromise = fetch(event.request, fetchOptions).then((response) => {
-        // Never cache opaque responses; their real status is unreadable, so a CDN error
-        // could otherwise poison the MediaPipe cache until the user clears site data.
+      const networkPromise = fetch(event.request).then((response) => {
+        // Cache only successful same-origin static responses.
         if (response && response.ok && response.type !== 'opaque') {
           cache.put(event.request, response.clone()).catch(() => {});
         }

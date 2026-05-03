@@ -1348,7 +1348,6 @@ def _task_is_ai_suggestion(task: Task) -> bool:
     return _task_type(task) == 'ai_suggestion'
 
 
-
 def _task_is_focus_eligible(task: Task) -> bool:
     return not _task_is_meal(task) and not _task_is_hydration(task) and not _task_is_eye_exercise(task) and not _task_is_ai_suggestion(task)
 
@@ -1456,7 +1455,7 @@ def _roll_over_pending_tasks(user_id: int) -> dict[str, int]:
         Task.user_id == user_id,
         Task.task_date < today,
         Task.completed.is_(False),
-        db.or_(Task.task_type.is_(None), Task.task_type != 'meal'),
+        db.or_(Task.task_type.is_(None), ~Task.task_type.in_(('meal',))),
         db.or_(
             Task.ai_generated_source.is_(None),
             Task.ai_generated_source != 'pattern_recognition',
@@ -1588,24 +1587,27 @@ def _selected_day_finished_items(events, tasks):
                 'time_label': event.event_time.strftime('%H:%M') if event.event_time else None,
                 'completed': True,
                 'sort_key': (0, sort_time, event.created_at or datetime.min),
-                'delete_endpoint': 'delete_event',
+                'delete_endpoint': 'tasks.delete_event',
             }
         )
 
     for task in tasks:
+        task_type = _task_type(task)
         if not task.completed:
             continue
+        time_label = None
+        description = (task.description or '').strip() or None
         combined.append(
             {
                 'kind': 'task',
                 'id': task.id,
                 'title': task.title,
-                'description': (task.description or '').strip() or None,
-                'task_type': _task_type(task),
-                'time_label': None,
-                'completed': True,
-                'sort_key': (1, datetime.min.time(), task.sort_order, task.created_at or datetime.min),
-                'delete_endpoint': 'delete_task',
+                'description': description,
+                'task_type': task_type,
+                'time_label': time_label,
+                'completed': bool(task.completed),
+                'sort_key': (1, _parse_time(time_label) or datetime.min.time(), task.sort_order, task.created_at or datetime.min),
+                'delete_endpoint': 'tasks.delete_task',
             }
         )
 
@@ -2969,6 +2971,78 @@ def _build_streak_cards(user: User):
 
 
 
-def _recent_activity_preview(user_id: int, limit: int = 8):
-    rows = ActivityEntry.query.filter_by(user_id=user_id).order_by(ActivityEntry.event_at.desc()).limit(limit).all()
-    return [_activity_entry_view_model(row, compact=True) for row in rows]
+def _recent_activity_preview(user_id: int, limit: int = 8, start_at: datetime | None = None, end_at: datetime | None = None):
+    """Return activity markers for the dashboard rhythm timeline.
+
+    The dashboard card is labeled TODAY, so the default query is limited to
+    the current local day. Callers can pass start_at/end_at when they need a
+    different range.
+    Nearby entries are grouped into one marker so their timeline dots and
+    labels do not overlap when several actions happen within a short window.
+    """
+    group_window_minutes = 30
+    if start_at is None:
+        start_at = datetime.combine(local_today(), datetime.min.time())
+    if end_at is None:
+        end_at = start_at + timedelta(days=1)
+    query = ActivityEntry.query.filter(ActivityEntry.user_id == user_id)
+    if start_at is not None:
+        query = query.filter(ActivityEntry.event_at >= start_at)
+    if end_at is not None:
+        query = query.filter(ActivityEntry.event_at < end_at)
+    rows = (
+        query
+        .order_by(ActivityEntry.event_at.desc())
+        .limit(max(limit * 4, limit))
+        .all()
+    )
+    entries = sorted(
+        [_activity_entry_view_model(row, compact=True) for row in rows],
+        key=lambda item: item['event_at'],
+    )
+    groups = []
+    for entry in entries:
+        event_at = entry['event_at']
+        minute = event_at.hour * 60 + event_at.minute
+        date_key = event_at.date()
+        if groups and groups[-1]['date_key'] == date_key and minute - groups[-1]['end_minute'] <= group_window_minutes:
+            groups[-1]['items'].append(entry)
+            groups[-1]['end_minute'] = minute
+            groups[-1]['end_at'] = event_at
+        else:
+            groups.append({
+                'date_key': date_key,
+                'start_minute': minute,
+                'end_minute': minute,
+                'start_at': event_at,
+                'end_at': event_at,
+                'items': [entry],
+            })
+
+    markers = []
+    for group in groups:
+        items = group['items']
+        if len(items) == 1:
+            marker = dict(items[0])
+            marker['timeline_count'] = 1
+            marker['timeline_items'] = items
+            marker['timeline_time_label'] = items[0]['event_at'].strftime('%H:%M')
+            markers.append(marker)
+            continue
+
+        start_label = group['start_at'].strftime('%H:%M')
+        end_label = group['end_at'].strftime('%H:%M')
+        time_label = start_label if start_label == end_label else f'{start_label}–{end_label}'
+        markers.append({
+            'row': items[-1].get('row'),
+            'title': f'{len(items)} events',
+            'entry_type': 'activity group',
+            'description': '; '.join(f"{item['event_at'].strftime('%H:%M')} · {item['title']}" for item in items),
+            'impacts': [],
+            'event_at': group['start_at'],
+            'timeline_count': len(items),
+            'timeline_items': items,
+            'timeline_time_label': time_label,
+        })
+
+    return markers[-limit:]

@@ -85,6 +85,16 @@ WellHabit's Care AI is designed for habit support.
 
 The Care AI screen shows these limits in the UI, and when a care chat ends on a negative tone the app can also show a region-matched crisis support contact based on the browser's locale/time zone when available.
 
+## Privacy & Responsibility
+
+- Camera is opt-in and only activates after you press Start Focus or manually enable.
+- Raw video frames are never uploaded; analysis runs in the browser.
+- Emotion/affect inference is temporary — only derived weak signals (e.g. PERCLOS %) leave the page.
+- Care chat data is used only for in-app support and is not shared.
+- You can delete your chat history and pattern history at any time from Profile.
+- The Wellness score is a behavioral estimate, not a diagnostic or clinical metric.
+- WellHabit is not therapy and not medical advice. In a crisis, contact 988 (US) or local emergency services.
+
 ## Packaging
 
 Create a clean release zip with:
